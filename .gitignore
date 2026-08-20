@@ -1,0 +1,6 @@
+.env
+.canvas_config.json
+.canvas_cookies.json
+venv/
+__pycache__/
+*.pyc
