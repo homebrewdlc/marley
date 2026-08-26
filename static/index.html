@@ -640,6 +640,427 @@ body::after {
   opacity: 0.6;
 }
 
+/* ── Tab navigation ──────────────────────────────────── */
+#tab-bar {
+  display: flex;
+  gap: 0;
+  margin-left: 24px;
+}
+
+.tab-btn {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  background: transparent;
+  border: 1px solid var(--panel-border);
+  border-bottom: none;
+  padding: 8px 20px;
+  cursor: pointer;
+  transition: all 0.25s;
+  position: relative;
+}
+
+.tab-btn:first-child { border-radius: 4px 0 0 0; }
+.tab-btn:last-child { border-radius: 0 4px 0 0; }
+
+.tab-btn:hover {
+  color: var(--cyan);
+  background: rgba(0, 229, 255, 0.03);
+}
+
+.tab-btn.active {
+  color: var(--cyan);
+  background: rgba(0, 229, 255, 0.06);
+  border-color: var(--cyan-dim);
+}
+
+.tab-btn.active::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--cyan);
+  box-shadow: 0 0 8px var(--cyan-glow);
+}
+
+/* ── Calendar view ───────────────────────────────────── */
+#calendar-view {
+  display: none;
+  flex: 1;
+  flex-direction: column;
+  width: 100%;
+  overflow-y: auto;
+  padding: 16px 4px;
+  min-height: 0;
+  mask-image: linear-gradient(to bottom, transparent 0%, black 2%, black 98%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 2%, black 98%, transparent 100%);
+}
+
+#calendar-view::-webkit-scrollbar { width: 4px; }
+#calendar-view::-webkit-scrollbar-track { background: transparent; }
+#calendar-view::-webkit-scrollbar-thumb { background: var(--cyan-dim); border-radius: 2px; }
+
+#calendar-view.visible { display: flex; }
+
+/* Calendar header bar */
+.cal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+  padding: 0 8px;
+}
+
+.cal-header h2 {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 6px;
+  color: var(--cyan);
+  text-shadow: 0 0 15px var(--cyan-glow);
+}
+
+.cal-header-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.cal-action-btn {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  background: transparent;
+  border: 1px solid var(--panel-border);
+  border-radius: 3px;
+  padding: 6px 14px;
+  cursor: pointer;
+  transition: all 0.25s;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cal-action-btn:hover {
+  color: var(--cyan);
+  border-color: var(--cyan-dim);
+  background: rgba(0, 229, 255, 0.05);
+}
+
+.cal-action-btn.loading {
+  pointer-events: none;
+  opacity: 0.5;
+}
+
+.cal-action-btn svg { width: 12px; height: 12px; }
+
+/* Week labels row */
+.cal-week-row {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+  margin-bottom: 8px;
+  padding: 0 8px;
+}
+
+.cal-day-label {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 2px;
+  color: var(--text-dim);
+  text-align: center;
+  text-transform: uppercase;
+}
+
+/* Calendar grid */
+.cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+  padding: 0 8px;
+  margin-bottom: 20px;
+}
+
+.cal-day {
+  min-height: 90px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  padding: 8px;
+  transition: border-color 0.3s;
+}
+
+.cal-day:hover {
+  border-color: var(--cyan-dim);
+}
+
+.cal-day.today {
+  border-color: var(--cyan);
+  box-shadow: 0 0 12px rgba(0, 229, 255, 0.1);
+}
+
+.cal-day.other-month {
+  opacity: 0.3;
+}
+
+.cal-day-number {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+
+.cal-day.today .cal-day-number {
+  color: var(--cyan);
+  text-shadow: 0 0 8px var(--cyan-glow);
+}
+
+/* Assignment chips in calendar cells */
+.cal-chip {
+  font-family: 'Rajdhani', sans-serif;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 3px 6px;
+  border-radius: 2px;
+  margin-bottom: 3px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: all 0.2s;
+  line-height: 1.3;
+}
+
+.cal-chip:hover {
+  filter: brightness(1.3);
+  transform: translateX(2px);
+}
+
+.cal-chip.urgent {
+  background: rgba(255, 51, 102, 0.15);
+  border-left: 2px solid var(--danger);
+  color: #ff6688;
+}
+
+.cal-chip.soon {
+  background: rgba(255, 170, 0, 0.12);
+  border-left: 2px solid var(--amber);
+  color: #ffcc44;
+}
+
+.cal-chip.normal {
+  background: rgba(0, 229, 255, 0.08);
+  border-left: 2px solid var(--cyan);
+  color: var(--cyan);
+}
+
+/* Assignment list (below calendar) */
+.cal-list {
+  padding: 0 8px;
+}
+
+.cal-list h3 {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 4px;
+  color: var(--cyan);
+  margin-bottom: 12px;
+  text-shadow: 0 0 10px var(--cyan-glow);
+}
+
+.cal-assignment {
+  display: flex;
+  align-items: stretch;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  margin-bottom: 8px;
+  overflow: hidden;
+  animation: msgIn 0.3s ease-out;
+  transition: border-color 0.25s, box-shadow 0.25s;
+}
+
+.cal-assignment:hover {
+  border-color: var(--cyan-dim);
+  box-shadow: 0 0 12px rgba(0, 229, 255, 0.06);
+}
+
+.cal-assignment-accent {
+  width: 4px;
+  flex-shrink: 0;
+}
+
+.cal-assignment-accent.urgent { background: var(--danger); box-shadow: 0 0 6px rgba(255, 51, 102, 0.4); }
+.cal-assignment-accent.soon { background: var(--amber); box-shadow: 0 0 6px rgba(255, 170, 0, 0.3); }
+.cal-assignment-accent.normal { background: var(--cyan); }
+
+.cal-assignment-body {
+  flex: 1;
+  padding: 12px 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}
+
+.cal-assignment-info { flex: 1; min-width: 0; }
+
+.cal-assignment-title {
+  font-family: 'Rajdhani', sans-serif;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cal-assignment-meta {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 1px;
+  color: var(--text-dim);
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.cal-assignment-meta span { display: flex; align-items: center; gap: 4px; }
+
+.cal-assignment-badge {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  padding: 4px 10px;
+  border-radius: 2px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.cal-assignment-badge.urgent {
+  color: var(--danger);
+  background: rgba(255, 51, 102, 0.1);
+  border: 1px solid rgba(255, 51, 102, 0.25);
+}
+
+.cal-assignment-badge.soon {
+  color: var(--amber);
+  background: rgba(255, 170, 0, 0.08);
+  border: 1px solid rgba(255, 170, 0, 0.2);
+}
+
+.cal-assignment-badge.normal {
+  color: var(--cyan);
+  background: rgba(0, 229, 255, 0.06);
+  border: 1px solid rgba(0, 229, 255, 0.15);
+}
+
+/* Strategy panel */
+.cal-strategy {
+  margin: 16px 8px 0;
+  padding: 16px 20px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-left: 3px solid var(--cyan);
+  border-radius: 4px;
+  animation: msgIn 0.3s ease-out;
+}
+
+.cal-strategy-header {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 4px;
+  color: var(--cyan);
+  margin-bottom: 12px;
+  text-shadow: 0 0 10px var(--cyan-glow);
+}
+
+.cal-strategy-body {
+  font-family: 'Rajdhani', sans-serif;
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--text);
+}
+
+.cal-strategy-body p { margin-bottom: 8px; }
+.cal-strategy-body strong { color: var(--cyan); }
+.cal-strategy-body li { margin-bottom: 4px; }
+.cal-strategy-body ul, .cal-strategy-body ol { padding-left: 20px; margin: 6px 0; }
+
+/* Empty state */
+.cal-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
+  text-align: center;
+}
+
+.cal-empty-icon {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 36px;
+  color: var(--cyan-dim);
+  margin-bottom: 16px;
+}
+
+.cal-empty h3 {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 14px;
+  letter-spacing: 6px;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+}
+
+.cal-empty p {
+  font-size: 13px;
+  color: var(--text-dim);
+  max-width: 400px;
+}
+
+.cal-error {
+  padding: 16px;
+  margin: 0 8px;
+  background: rgba(255, 51, 102, 0.06);
+  border: 1px solid rgba(255, 51, 102, 0.2);
+  border-radius: 4px;
+  color: var(--danger);
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 12px;
+  letter-spacing: 1px;
+}
+
+/* Loading skeleton */
+.cal-loading {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 8px;
+}
+
+.cal-skeleton {
+  height: 60px;
+  background: linear-gradient(90deg, var(--panel) 25%, rgba(0, 229, 255, 0.04) 50%, var(--panel) 75%);
+  background-size: 200% 100%;
+  border-radius: 4px;
+  animation: shimmer 1.5s infinite;
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
 /* ── Responsive ───────────────────────────────────────── */
 @media (max-width: 768px) {
   #app { padding: 10px 14px; }
@@ -648,6 +1069,14 @@ body::after {
   .message { max-width: 95%; }
   #header-right { gap: 10px; }
   #clock { display: none; }
+  .cal-grid { grid-template-columns: repeat(7, 1fr); gap: 3px; }
+  .cal-day { min-height: 60px; padding: 4px; }
+  .cal-day-number { font-size: 10px; }
+  .cal-chip { font-size: 9px; padding: 2px 4px; }
+  .cal-header { flex-direction: column; gap: 8px; align-items: flex-start; }
+  .cal-header-actions { flex-wrap: wrap; }
+  #tab-bar { margin-left: 12px; }
+  .tab-btn { padding: 6px 12px; font-size: 10px; }
 }
 
 @media (max-width: 480px) {
@@ -655,6 +1084,10 @@ body::after {
   #logo .subtitle { display: none; }
   #ring-container { width: 120px; height: 120px; }
   #status-badge { font-size: 9px; padding: 4px 10px; }
+  .cal-grid { gap: 2px; }
+  .cal-day { min-height: 50px; }
+  .cal-chip { display: none; }
+  .tab-btn { padding: 5px 10px; font-size: 9px; letter-spacing: 2px; }
 }
 </style>
 </head>
@@ -671,6 +1104,10 @@ body::after {
         <h1>MARLEY</h1>
         <div class="subtitle">Advanced Intelligence System</div>
       </div>
+    </div>
+    <div id="tab-bar">
+      <button class="tab-btn active" data-tab="chat" onclick="switchTab('chat')">CHAT</button>
+      <button class="tab-btn" data-tab="calendar" onclick="switchTab('calendar')">CALENDAR</button>
     </div>
     <div id="header-right">
       <div id="status-badge">
@@ -708,6 +1145,57 @@ body::after {
 
     <!-- Chat -->
     <div id="chat-area"></div>
+
+    <!-- Calendar -->
+    <div id="calendar-view">
+      <div class="cal-header">
+        <h2>ASSIGNMENTS</h2>
+        <div class="cal-header-actions">
+          <button class="cal-action-btn" onclick="refreshCalendar()" title="Refresh assignments">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
+              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+            </svg>
+            REFRESH
+          </button>
+          <button class="cal-action-btn" id="strategy-btn" onclick="getStrategy()" title="Get weekly strategy from Marley">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/>
+              <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
+            </svg>
+            STRATEGY
+          </button>
+          <button class="cal-action-btn" id="speak-cal-btn" onclick="speakAssignments()" title="Have Marley read assignments aloud">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+              <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
+              <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+            </svg>
+            SPEAK
+          </button>
+        </div>
+      </div>
+
+      <!-- Week labels -->
+      <div class="cal-week-row">
+        <div class="cal-day-label">SUN</div>
+        <div class="cal-day-label">MON</div>
+        <div class="cal-day-label">TUE</div>
+        <div class="cal-day-label">WED</div>
+        <div class="cal-day-label">THU</div>
+        <div class="cal-day-label">FRI</div>
+        <div class="cal-day-label">SAT</div>
+      </div>
+
+      <!-- Calendar grid (filled by JS) -->
+      <div class="cal-grid" id="cal-grid"></div>
+
+      <!-- Assignment list -->
+      <div class="cal-list" id="cal-list"></div>
+
+      <!-- Strategy panel (hidden until requested) -->
+      <div id="cal-strategy-panel"></div>
+    </div>
   </div>
 
   <!-- Bottom bar -->
@@ -844,10 +1332,18 @@ function handleMessage(data) {
       if (!currentBubble) {
         currentBubble = addMessage('marley', '');
         currentRawText = '';
+        // Prepare TTS streaming for this response
+        if (voiceEnabled) {
+          resetTTS();
+          ttsPlayIndex = 0;
+          isSpeaking = true;
+        }
       }
       currentRawText += data.text;
       currentBubble.innerHTML = renderMarkdown(currentRawText);
       scrollChat();
+      // Feed chunk to TTS immediately — it will fire on sentence boundaries
+      if (voiceEnabled) ttsFeedChunk(data.text);
       break;
 
     case 'session_saved':
@@ -859,10 +1355,11 @@ function handleMessage(data) {
       marleyIsProcessing = false;
 
       if (currentRawText && voiceEnabled) {
-        speak(currentRawText, () => {
+        // Flush remaining buffered text to TTS and set completion callback
+        ttsFlush(() => {
           onResponseComplete();
         });
-        // Start listening immediately while she speaks — user can interrupt
+        // Start listening while Marley speaks — user can interrupt
         if (inConversation) {
           setTimeout(() => startConversationCapture(), 300);
         }
@@ -925,9 +1422,7 @@ function sendText(text) {
   if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
   // Interrupt Marley if speaking
   if (isSpeaking) {
-    if (currentAudio) { currentAudio.pause(); currentAudio = null; }
-    speechSynthesis.cancel();
-    isSpeaking = false;
+    stopAllSpeech();
   }
   addMessage('user', text);
   ws.send(JSON.stringify({ message: text }));
@@ -956,9 +1451,7 @@ function handleRingTap() {
 
   // If speaking, interrupt
   if (isSpeaking) {
-    if (currentAudio) { currentAudio.pause(); currentAudio = null; }
-    speechSynthesis.cancel();
-    isSpeaking = false;
+    stopAllSpeech();
   }
 
   // If already listening, stop everything
@@ -1218,62 +1711,176 @@ function setRingState(state) {
   if (state === 'listening') ring.classList.add('listening');
 }
 
-// ── Voice output ────────────────────────────────────────
+// ── Voice output (streaming sentence-by-sentence) ───────
 function toggleVoice() {
   voiceEnabled = !voiceEnabled;
   const btn = document.getElementById('vox-btn');
   btn.classList.toggle('active', voiceEnabled);
+  if (!voiceEnabled) stopAllSpeech();
 }
 
 let currentAudio = null;
 
-function speak(text, onDone) {
-  // Stop any current playback
-  if (currentAudio) {
-    currentAudio.pause();
-    currentAudio = null;
-  }
-  speechSynthesis.cancel();
+// Sentence-chunked TTS queue
+let ttsQueue = [];        // queued audio blobs waiting to play
+let ttsFetching = 0;      // number of TTS requests in flight
+let ttsBuffer = '';        // accumulated text waiting for sentence boundary
+let ttsDoneCallback = null;
+let ttsStreamDone = false; // true once the 'done' event fires
 
-  isSpeaking = true;
+function resetTTS() {
+  ttsQueue = [];
+  ttsFetching = 0;
+  ttsBuffer = '';
+  ttsDoneCallback = null;
+  ttsStreamDone = false;
+  ttsPlayIndex = 0;
+  ttsPlaying = false;
+}
+
+function stopAllSpeech() {
+  if (currentAudio) { currentAudio.pause(); currentAudio = null; }
+  speechSynthesis.cancel();
+  isSpeaking = false;
+  resetTTS();
+}
+
+// Called on each streaming delta while voice is enabled
+function ttsFeedChunk(text) {
+  ttsBuffer += text;
+  // Keep extracting sentences as long as we find boundaries
+  let keepGoing = true;
+  while (keepGoing) {
+    // Match sentence ending with . ! ? followed by space, newline, or end of buffer
+    const sentenceMatch = ttsBuffer.match(/^([\s\S]*?[.!?\n])\s/);
+    if (sentenceMatch) {
+      const sentence = sentenceMatch[1].trim();
+      ttsBuffer = ttsBuffer.slice(sentenceMatch[0].length);
+      if (sentence.length > 2) {
+        fetchAndQueueTTS(sentence);
+      }
+    } else {
+      keepGoing = false;
+    }
+  }
+}
+
+// Called when streaming is fully done — flush remaining buffer
+function ttsFlush(onDone) {
+  ttsDoneCallback = onDone;
+  ttsStreamDone = true;
+  const remaining = ttsBuffer.trim();
+  ttsBuffer = '';
+  if (remaining.length > 2) {
+    fetchAndQueueTTS(remaining);
+  } else {
+    checkTTSComplete();
+  }
+}
+
+function fetchAndQueueTTS(sentence) {
+  ttsFetching++;
+  const queueIndex = ttsQueue.length;
+  ttsQueue.push(null); // placeholder
 
   fetch('/api/tts', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({ text: sentence }),
   })
   .then(resp => {
     if (!resp.ok) throw new Error('TTS failed');
     return resp.blob();
   })
   .then(blob => {
-    // Check if we were interrupted while waiting
-    if (!isSpeaking) {
-      if (onDone) onDone();
-      return;
-    }
-    const url = URL.createObjectURL(blob);
-    const audio = new Audio(url);
-    currentAudio = audio;
-    audio.onended = () => {
-      isSpeaking = false;
-      currentAudio = null;
-      URL.revokeObjectURL(url);
-      if (onDone) onDone();
-    };
-    audio.onerror = () => {
-      isSpeaking = false;
-      currentAudio = null;
-      URL.revokeObjectURL(url);
-      if (onDone) onDone();
-    };
-    audio.play();
+    ttsFetching--;
+    if (!voiceEnabled) { checkTTSComplete(); return; }
+    ttsQueue[queueIndex] = blob;
+    playNextInQueue();
   })
   .catch(() => {
-    // Fallback to browser TTS if ElevenLabs fails
-    isSpeaking = false;
-    if (onDone) onDone();
+    ttsFetching--;
+    ttsQueue[queueIndex] = 'skip';
+    playNextInQueue();
   });
+}
+
+let ttsPlayIndex = 0; // which queue slot to play next
+let ttsPlaying = false;
+
+function playNextInQueue() {
+  if (ttsPlaying) return; // already playing, onended will advance
+  if (ttsPlayIndex >= ttsQueue.length) {
+    checkTTSComplete();
+    return;
+  }
+
+  const item = ttsQueue[ttsPlayIndex];
+  if (item === null) return; // not fetched yet, wait
+  if (item === 'skip') {
+    ttsPlayIndex++;
+    playNextInQueue();
+    return;
+  }
+
+  ttsPlaying = true;
+  isSpeaking = true;
+  const url = URL.createObjectURL(item);
+  const audio = new Audio(url);
+  currentAudio = audio;
+
+  audio.onended = () => {
+    ttsPlaying = false;
+    currentAudio = null;
+    URL.revokeObjectURL(url);
+    ttsPlayIndex++;
+    playNextInQueue();
+  };
+
+  audio.onerror = () => {
+    ttsPlaying = false;
+    currentAudio = null;
+    URL.revokeObjectURL(url);
+    ttsPlayIndex++;
+    playNextInQueue();
+  };
+
+  audio.play().catch(() => {
+    ttsPlaying = false;
+    currentAudio = null;
+    ttsPlayIndex++;
+    playNextInQueue();
+  });
+}
+
+function checkTTSComplete() {
+  if (!ttsStreamDone) return;
+  if (ttsFetching > 0) return;
+  if (ttsPlayIndex < ttsQueue.length) {
+    // Still items to play
+    const remaining = ttsQueue.slice(ttsPlayIndex);
+    if (remaining.some(x => x === null)) return; // still fetching
+    if (remaining.some(x => x !== 'skip')) return; // still need to play
+  }
+  // All done
+  isSpeaking = false;
+  ttsPlayIndex = 0;
+  if (ttsDoneCallback) {
+    const cb = ttsDoneCallback;
+    ttsDoneCallback = null;
+    cb();
+  }
+}
+
+// Legacy speak() for short one-off messages (farewell, etc.)
+function speak(text, onDone) {
+  stopAllSpeech();
+  resetTTS();
+  ttsPlayIndex = 0;
+  isSpeaking = true;
+  fetchAndQueueTTS(text);
+  ttsStreamDone = true;
+  ttsDoneCallback = onDone;
 }
 
 // ── Text input toggle ───────────────────────────────────
@@ -1410,6 +2017,254 @@ document.getElementById('msg-input').addEventListener('keydown', (e) => {
     sendMessage();
   }
 });
+
+// ── Tab system ──────────────────────────────────────────
+let currentTab = 'chat';
+let calendarData = null;
+
+function switchTab(tab) {
+  currentTab = tab;
+  // Update tab buttons
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.tab === tab);
+  });
+
+  // Toggle views
+  const chatElements = [
+    document.getElementById('ring-container'),
+    document.getElementById('live-transcript'),
+    document.getElementById('welcome'),
+    document.getElementById('chat-area'),
+  ];
+  const calView = document.getElementById('calendar-view');
+  const bottomBar = document.getElementById('bottom-bar');
+
+  if (tab === 'chat') {
+    chatElements.forEach(el => { if (el) el.style.display = ''; });
+    calView.classList.remove('visible');
+    bottomBar.style.display = '';
+  } else {
+    chatElements.forEach(el => { if (el) el.style.display = 'none'; });
+    calView.classList.add('visible');
+    bottomBar.style.display = 'none';
+    if (!calendarData) refreshCalendar();
+  }
+}
+
+// ── Calendar logic ──────────────────────────────────────
+function refreshCalendar() {
+  const grid = document.getElementById('cal-grid');
+  const list = document.getElementById('cal-list');
+  grid.innerHTML = '';
+  list.innerHTML = '<div class="cal-loading">' +
+    '<div class="cal-skeleton"></div>'.repeat(4) + '</div>';
+
+  fetch('/api/calendar')
+    .then(r => r.json())
+    .then(data => {
+      if (data.error) {
+        list.innerHTML = `<div class="cal-error">${escapeHtml(data.error)}</div>`;
+        renderCalendarGrid([]);
+        return;
+      }
+      calendarData = data.assignments || [];
+      renderCalendarGrid(calendarData);
+      renderAssignmentList(calendarData);
+    })
+    .catch(err => {
+      list.innerHTML = `<div class="cal-error">Failed to load assignments: ${err.message}</div>`;
+    });
+}
+
+function getUrgencyClass(daysLeft) {
+  if (daysLeft <= 1) return 'urgent';
+  if (daysLeft <= 3) return 'soon';
+  return 'normal';
+}
+
+function getUrgencyLabel(daysLeft) {
+  if (daysLeft < 0) return 'OVERDUE';
+  if (daysLeft === 0) return 'TODAY';
+  if (daysLeft === 1) return 'TOMORROW';
+  return daysLeft + ' DAYS';
+}
+
+function renderCalendarGrid(assignments) {
+  const grid = document.getElementById('cal-grid');
+  grid.innerHTML = '';
+
+  const today = new Date();
+  const year = today.getFullYear();
+  const month = today.getMonth();
+
+  // First day of month and how many days
+  const firstDay = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const daysInPrev = new Date(year, month, 0).getDate();
+
+  // Build assignment lookup by date string (YYYY-MM-DD)
+  const assignmentsByDate = {};
+  assignments.forEach(a => {
+    // Parse the due string to get the date
+    const dateKey = parseDueToDateKey(a.due, a.days_left);
+    if (dateKey) {
+      if (!assignmentsByDate[dateKey]) assignmentsByDate[dateKey] = [];
+      assignmentsByDate[dateKey].push(a);
+    }
+  });
+
+  // Previous month trailing days
+  for (let i = firstDay - 1; i >= 0; i--) {
+    const day = daysInPrev - i;
+    const cell = createDayCell(day, true, []);
+    grid.appendChild(cell);
+  }
+
+  // Current month days
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    const isToday = d === today.getDate();
+    const dayAssignments = assignmentsByDate[dateStr] || [];
+    const cell = createDayCell(d, false, dayAssignments, isToday);
+    grid.appendChild(cell);
+  }
+
+  // Next month leading days to fill the grid
+  const totalCells = grid.children.length;
+  const remaining = (7 - (totalCells % 7)) % 7;
+  for (let d = 1; d <= remaining; d++) {
+    const cell = createDayCell(d, true, []);
+    grid.appendChild(cell);
+  }
+}
+
+function parseDueToDateKey(dueStr, daysLeft) {
+  // daysLeft is relative to today, so we can compute the absolute date
+  const target = new Date();
+  target.setDate(target.getDate() + daysLeft);
+  return `${target.getFullYear()}-${String(target.getMonth() + 1).padStart(2, '0')}-${String(target.getDate()).padStart(2, '0')}`;
+}
+
+function createDayCell(day, otherMonth, assignments, isToday = false) {
+  const cell = document.createElement('div');
+  cell.className = 'cal-day' + (otherMonth ? ' other-month' : '') + (isToday ? ' today' : '');
+
+  let html = `<div class="cal-day-number">${day}</div>`;
+
+  assignments.slice(0, 3).forEach(a => {
+    const urgency = getUrgencyClass(a.days_left);
+    html += `<div class="cal-chip ${urgency}" title="${escapeHtml(a.title)} (${a.course})">${escapeHtml(a.title)}</div>`;
+  });
+
+  if (assignments.length > 3) {
+    html += `<div class="cal-chip normal" style="opacity:0.5">+${assignments.length - 3} more</div>`;
+  }
+
+  cell.innerHTML = html;
+  return cell;
+}
+
+function renderAssignmentList(assignments) {
+  const list = document.getElementById('cal-list');
+
+  if (!assignments.length) {
+    list.innerHTML = `
+      <div class="cal-empty">
+        <div class="cal-empty-icon">///</div>
+        <h3>ALL CLEAR</h3>
+        <p>No assignments due in the next 14 days. Either Canvas session expired, or you are genuinely free.</p>
+      </div>`;
+    return;
+  }
+
+  let html = `<h3>UPCOMING (${assignments.length})</h3>`;
+
+  assignments.forEach(a => {
+    const urgency = getUrgencyClass(a.days_left);
+    const label = getUrgencyLabel(a.days_left);
+
+    html += `
+      <div class="cal-assignment" ${a.url ? `onclick="window.open('${a.url}', '_blank')" style="cursor:pointer"` : ''}>
+        <div class="cal-assignment-accent ${urgency}"></div>
+        <div class="cal-assignment-body">
+          <div class="cal-assignment-info">
+            <div class="cal-assignment-title">${escapeHtml(a.title)}</div>
+            <div class="cal-assignment-meta">
+              <span>${escapeHtml(a.course)}</span>
+              <span>${escapeHtml(a.due)}</span>
+              <span>${a.points} pts</span>
+            </div>
+          </div>
+          <div class="cal-assignment-badge ${urgency}">${label}</div>
+        </div>
+      </div>`;
+  });
+
+  list.innerHTML = html;
+}
+
+function getStrategy() {
+  const btn = document.getElementById('strategy-btn');
+  const panel = document.getElementById('cal-strategy-panel');
+  btn.classList.add('loading');
+  btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="animation: rotateArc 1s linear infinite"><polyline points="23 4 23 10 17 10"/></svg> THINKING...`;
+
+  fetch('/api/calendar/strategy', { method: 'POST' })
+    .then(r => r.json())
+    .then(data => {
+      btn.classList.remove('loading');
+      btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg> STRATEGY`;
+
+      if (data.error) {
+        panel.innerHTML = `<div class="cal-error">${escapeHtml(data.error)}</div>`;
+        return;
+      }
+
+      panel.innerHTML = `
+        <div class="cal-strategy">
+          <div class="cal-strategy-header">MARLEY'S STRATEGY</div>
+          <div class="cal-strategy-body">${renderMarkdown(data.strategy)}</div>
+        </div>`;
+    })
+    .catch(err => {
+      btn.classList.remove('loading');
+      btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg> STRATEGY`;
+      panel.innerHTML = `<div class="cal-error">Strategy request failed: ${err.message}</div>`;
+    });
+}
+
+function speakAssignments() {
+  if (!calendarData || !calendarData.length) {
+    speak('No upcoming assignments found, Devin.');
+    return;
+  }
+
+  // Build a natural speech summary
+  let speech = `You have ${calendarData.length} assignment${calendarData.length > 1 ? 's' : ''} coming up, Devin. `;
+  const urgent = calendarData.filter(a => a.days_left <= 1);
+  const soon = calendarData.filter(a => a.days_left > 1 && a.days_left <= 3);
+
+  if (urgent.length) {
+    speech += `${urgent.length} due within 24 hours. `;
+    urgent.forEach(a => {
+      speech += `${a.title} for ${a.course}, worth ${a.points} points. `;
+    });
+  }
+
+  if (soon.length) {
+    speech += `${soon.length} due within 3 days. `;
+    soon.forEach(a => {
+      speech += `${a.title} for ${a.course}, due ${a.due}. `;
+    });
+  }
+
+  const later = calendarData.filter(a => a.days_left > 3);
+  if (later.length) {
+    speech += `And ${later.length} more due later this week or beyond.`;
+  }
+
+  speak(speech);
+}
 
 // ── Init ────────────────────────────────────────────────
 document.getElementById('vox-btn').classList.add('active');

@@ -613,7 +613,7 @@ You have access to these systems on this machine:
 - For casual questions about systems, use the appropriate tool and summarize naturally
 - For homework/school questions, use check_canvas — summarize naturally, highlight urgency
 - If Canvas returns "not configured", ask for the school's Canvas URL, email, and password, then use canvas_setup
-- If Canvas returns "not logged in" or "session expired", use canvas_login and tell the user to approve the push on their phone
+- If Canvas returns "not logged in" or "session expired", do NOT automatically call canvas_login. Instead, tell the user their Canvas session needs to be refreshed and ask them to say "log into Canvas" when they are ready (they will need to approve a 2FA push on their phone). Only call canvas_login when the user explicitly asks to log in.
 - For general knowledge or current events, use web search
 - For building/coding requests, you can launch Claude Code with `run_command`
 - Keep responses conversational unless the user wants detail
@@ -628,6 +628,62 @@ ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "JBFqnCBsd6RMkjVDRZzb")
 @app.get("/")
 async def index():
     return FileResponse(Path(__file__).parent / "static" / "index.html")
+
+
+@app.get("/api/calendar")
+async def calendar_assignments():
+    """Return Canvas assignments for the calendar UI (no Claude needed)."""
+    try:
+        assignments = get_assignments()
+        return {"assignments": assignments, "count": len(assignments)}
+    except ValueError as e:
+        return {"error": str(e), "assignments": []}
+    except Exception as e:
+        return {"error": f"Failed to fetch assignments: {e}", "assignments": []}
+
+
+@app.post("/api/calendar/strategy")
+async def calendar_strategy(request: Request):
+    """Ask Claude for a weekly strategy based on current assignments."""
+    try:
+        assignments = get_assignments()
+    except ValueError as e:
+        return {"error": str(e)}
+    except Exception as e:
+        return {"error": f"Failed to fetch assignments: {e}"}
+
+    if not assignments:
+        return {"strategy": "No upcoming assignments found. Enjoy the free time, but stay sharp."}
+
+    # Build assignment summary for Claude
+    assignment_text = "\n".join(
+        f"- {a['title']} ({a['course']}) — due {a['due']}, {a['days_left']} days left, {a['points']} pts"
+        for a in assignments
+    )
+
+    strategy_prompt = f"""Here are Devin's upcoming assignments:
+
+{assignment_text}
+
+Give Devin a concise, actionable weekly strategy for tackling these assignments. Consider:
+- Urgency (what's due soonest)
+- Point value (high-value assignments deserve more time)
+- Logical grouping (similar subjects back to back)
+- Realistic daily workload
+
+Be direct, no fluff. Address him as Devin. No emojis. Format with clear day-by-day or priority-based structure."""
+
+    try:
+        response = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=1500,
+            system="You are MARLEY, a sharp AI assistant like JARVIS. Give concise, actionable academic strategy advice. No emojis. British-dry wit is welcome.",
+            messages=[{"role": "user", "content": strategy_prompt}],
+        )
+        strategy_text = response.content[0].text
+        return {"strategy": strategy_text, "assignment_count": len(assignments)}
+    except Exception as e:
+        return {"error": f"Strategy generation failed: {e}"}
 
 
 @app.post("/api/tts")

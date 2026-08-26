@@ -241,17 +241,35 @@ def _login_thread(email: str, password: str):
         except PlaywrightTimeout:
             page.wait_for_load_state("load", timeout=10_000)
 
-        if _has_error(page):
-            _init_q.put(_auth_set(status="error", message=_error_text(page) or "Incorrect password."))
-            return
-
         if _on_canvas(page):
             _init_q.put(_finish(page))
             return
 
-        # 2FA detection
-        twofa = _detect_2fa(page)
-        print(f"[canvas-auth] 2FA type: {twofa}", flush=True)
+        # Wait for 2FA page to load
+        try:
+            page.wait_for_selector('div[data-value], input[name="otc"], input[name="code"], #idRichContext_DisplaySign', timeout=20_000)
+        except PlaywrightTimeout:
+            pass
+
+        # Only treat as a hard error if the method picker is NOT present
+        # (the "trouble verifying" message often appears alongside the picker as a soft warning)
+        if _has_error(page) and not _is_method_picker(page):
+            _init_q.put(_auth_set(status="error", message=_error_text(page) or "Incorrect password."))
+            return
+
+        is_picker = _is_method_picker(page)
+        print(f"[canvas-auth] Method picker check: {is_picker}", flush=True)
+        if is_picker:
+            picked = _pick_otp_method(page)
+            if picked:
+                twofa = "code"
+                print("[canvas-auth] Switched to OTP code entry", flush=True)
+            else:
+                twofa = _detect_2fa(page)
+                print(f"[canvas-auth] OTP pick failed, fallback 2FA type: {twofa}", flush=True)
+        else:
+            twofa = _detect_2fa(page)
+            print(f"[canvas-auth] 2FA type: {twofa}", flush=True)
 
         if twofa == "push":
             number = _get_display_number(page)
@@ -270,7 +288,7 @@ def _login_thread(email: str, password: str):
                 return
 
             filled = False
-            for sel in ['input[name="otc"]', 'input[name="code"]', 'input[autocomplete="one-time-code"]']:
+            for sel in ['#idTxtBx_SAOTCC_OTC', 'input[name="otc"]', 'input[name="code"]', 'input[autocomplete="one-time-code"]']:
                 try:
                     page.wait_for_selector(sel, timeout=5_000)
                     page.fill(sel, code)
@@ -415,6 +433,37 @@ def _detect_2fa(page) -> str | None:
     if any(k in html for k in ["verification code", "enter the code", "one-time"]):
         return "code"
     return None
+
+
+def _is_method_picker(page) -> bool:
+    """Check if the page is a 2FA method selection screen."""
+    try:
+        count = page.locator('div[data-value="PhoneAppOTP"]').count()
+        total = page.locator('div[data-value]').count()
+        print(f"[canvas-auth] _is_method_picker: PhoneAppOTP={count}, total data-value divs={total}", flush=True)
+        # It's a picker if there are multiple method options
+        return total >= 2
+    except Exception as e:
+        print(f"[canvas-auth] _is_method_picker error: {e}", flush=True)
+        return False
+
+
+def _pick_otp_method(page) -> bool:
+    """Click the OTP code option on the method picker page."""
+    from playwright.sync_api import TimeoutError as PlaywrightTimeout
+    try:
+        otp_option = page.locator('div[data-value="PhoneAppOTP"]').first
+        if otp_option.count() > 0 and otp_option.is_visible():
+            otp_option.click()
+            # Wait for the code input to appear — it loads dynamically
+            try:
+                page.wait_for_selector('#idTxtBx_SAOTCC_OTC, input[name="otc"]', timeout=10_000)
+                return True
+            except PlaywrightTimeout:
+                pass
+    except Exception as e:
+        print(f"[canvas-auth] OTP pick error: {e}", flush=True)
+    return False
 
 
 def _get_display_number(page) -> str | None:

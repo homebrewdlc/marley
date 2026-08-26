@@ -1,0 +1,170 @@
+#!/usr/bin/env bash
+# ── MARLEY launcher ──────────────────────────────────────
+# Usage:
+#   ./marley          Start the server
+#   ./marley stop     Stop the server
+#   ./marley status   Check if running
+#   ./marley setup    First-time setup (venv + deps + playwright)
+#   ./marley logs     Tail server output
+
+set -euo pipefail
+
+DIR="$(cd "$(dirname "$0")" && pwd)"
+VENV="$DIR/venv"
+PID_FILE="$DIR/.marley.pid"
+LOG_FILE="$DIR/.marley.log"
+PORT="${PORT:-7777}"
+
+# Colors
+CYAN='\033[0;36m'
+GREEN='\033[0;32m'
+RED='\033[0;31m'
+DIM='\033[2m'
+NC='\033[0m'
+
+banner() {
+  echo -e "${CYAN}"
+  echo "  ╔══════════════════════════════════════╗"
+  echo "  ║          M A R L E Y                 ║"
+  echo "  ║      Advanced Intelligence System    ║"
+  echo "  ╚══════════════════════════════════════╝"
+  echo -e "${NC}"
+}
+
+check_python() {
+  if command -v python3 &>/dev/null; then
+    echo "python3"
+  elif command -v python &>/dev/null; then
+    echo "python"
+  else
+    echo -e "${RED}Error: Python 3.11+ is required but not found.${NC}" >&2
+    exit 1
+  fi
+}
+
+cmd_setup() {
+  banner
+  local PY
+  PY=$(check_python)
+
+  echo -e "${CYAN}[1/4]${NC} Creating virtual environment..."
+  $PY -m venv "$VENV"
+
+  echo -e "${CYAN}[2/4]${NC} Installing dependencies..."
+  "$VENV/bin/pip" install --upgrade pip -q
+  "$VENV/bin/pip" install -r "$DIR/requirements.txt" -q
+
+  echo -e "${CYAN}[3/4]${NC} Installing Playwright + Chromium (for Canvas LMS)..."
+  "$VENV/bin/pip" install playwright -q
+  "$VENV/bin/playwright" install chromium 2>/dev/null || echo -e "${DIM}  Playwright install skipped (run manually if needed)${NC}"
+
+  echo -e "${CYAN}[4/4]${NC} Checking .env configuration..."
+  if [ ! -f "$DIR/.env" ]; then
+    cp "$DIR/.env.example" "$DIR/.env" 2>/dev/null || true
+    echo -e "${RED}  .env file created from template. Edit it with your API keys:${NC}"
+    echo -e "  ${DIM}$DIR/.env${NC}"
+  else
+    echo -e "${GREEN}  .env already exists.${NC}"
+  fi
+
+  echo ""
+  echo -e "${GREEN}Setup complete.${NC} Run ${CYAN}./marley${NC} to start."
+}
+
+cmd_start() {
+  banner
+
+  if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+    echo -e "${GREEN}MARLEY is already running${NC} (PID $(cat "$PID_FILE"))"
+    echo -e "  ${DIM}http://localhost:$PORT${NC}"
+    return 0
+  fi
+
+  if [ ! -d "$VENV" ]; then
+    echo -e "${RED}Virtual environment not found.${NC} Run ${CYAN}./marley setup${NC} first."
+    exit 1
+  fi
+
+  if [ ! -f "$DIR/.env" ]; then
+    echo -e "${RED}.env file not found.${NC} Copy .env.example to .env and add your API keys."
+    exit 1
+  fi
+
+  echo -e "${DIM}Starting on port $PORT...${NC}"
+  cd "$DIR"
+  "$VENV/bin/python" server.py > "$LOG_FILE" 2>&1 &
+  local PID=$!
+  echo "$PID" > "$PID_FILE"
+
+  # Wait briefly and check it didn't crash
+  sleep 1
+  if kill -0 "$PID" 2>/dev/null; then
+    echo -e "${GREEN}MARLEY is online${NC} at ${CYAN}http://localhost:$PORT${NC}"
+    echo -e "${DIM}PID: $PID | Logs: ./marley logs${NC}"
+  else
+    echo -e "${RED}Failed to start.${NC} Check logs:"
+    tail -20 "$LOG_FILE"
+    rm -f "$PID_FILE"
+    exit 1
+  fi
+}
+
+cmd_stop() {
+  if [ -f "$PID_FILE" ]; then
+    local PID
+    PID=$(cat "$PID_FILE")
+    if kill -0 "$PID" 2>/dev/null; then
+      kill "$PID"
+      rm -f "$PID_FILE"
+      echo -e "${GREEN}MARLEY stopped${NC} (PID $PID)"
+    else
+      rm -f "$PID_FILE"
+      echo -e "${DIM}PID $PID was not running. Cleaned up.${NC}"
+    fi
+  else
+    # Try to find it anyway
+    local PID
+    PID=$(pgrep -f "marley.*server\.py" 2>/dev/null | head -1) || true
+    if [ -n "$PID" ]; then
+      kill "$PID"
+      echo -e "${GREEN}MARLEY stopped${NC} (PID $PID)"
+    else
+      echo -e "${DIM}MARLEY is not running.${NC}"
+    fi
+  fi
+}
+
+cmd_status() {
+  if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+    echo -e "${GREEN}MARLEY is running${NC} (PID $(cat "$PID_FILE"))  ${CYAN}http://localhost:$PORT${NC}"
+  else
+    echo -e "${DIM}MARLEY is not running.${NC}"
+    rm -f "$PID_FILE" 2>/dev/null
+  fi
+}
+
+cmd_logs() {
+  if [ -f "$LOG_FILE" ]; then
+    tail -f "$LOG_FILE"
+  else
+    echo -e "${DIM}No log file found.${NC}"
+  fi
+}
+
+# ── Route command ────────────────────────────────────────
+case "${1:-start}" in
+  setup)  cmd_setup  ;;
+  start)  cmd_start  ;;
+  stop)   cmd_stop   ;;
+  status) cmd_status ;;
+  logs)   cmd_logs   ;;
+  restart)
+    cmd_stop
+    sleep 1
+    cmd_start
+    ;;
+  *)
+    echo "Usage: ./marley [setup|start|stop|restart|status|logs]"
+    exit 1
+    ;;
+esac

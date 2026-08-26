@@ -1,6 +1,8 @@
 .env
 .canvas_config.json
 .canvas_cookies.json
+.marley.pid
+.marley.log
 venv/
 __pycache__/
 *.pyc
