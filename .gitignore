@@ -3,6 +3,7 @@
 .canvas_cookies.json
 .marley.pid
 .marley.log
+cert/
 venv/
 __pycache__/
 *.pyc

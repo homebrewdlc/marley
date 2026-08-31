@@ -514,6 +514,16 @@ body::after {
   background: rgba(0, 255, 136, 0.05);
 }
 
+.bar-btn.paused {
+  color: var(--amber);
+  border-color: rgba(255, 170, 0, 0.3);
+  background: rgba(255, 170, 0, 0.08);
+  animation: subtlePulse 2s ease-in-out infinite;
+}
+
+#pause-btn { display: none; }
+#pause-btn.visible { display: flex; }
+
 .bar-btn.active.wake-listening {
   color: var(--cyan);
   border-color: var(--cyan-dim);
@@ -1061,6 +1071,140 @@ body::after {
   100% { background-position: -200% 0; }
 }
 
+/* ── Memory view ─────────────────────────────────────── */
+#memory-view {
+  display: none;
+  flex: 1;
+  flex-direction: column;
+  width: 100%;
+  overflow-y: auto;
+  padding: 16px 4px;
+  min-height: 0;
+}
+
+#memory-view.visible { display: flex; }
+
+#memory-view::-webkit-scrollbar { width: 4px; }
+#memory-view::-webkit-scrollbar-track { background: transparent; }
+#memory-view::-webkit-scrollbar-thumb { background: var(--cyan-dim); border-radius: 2px; }
+
+.mem-doc {
+  display: flex;
+  align-items: center;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  margin-bottom: 8px;
+  padding: 14px 16px;
+  gap: 16px;
+  animation: msgIn 0.3s ease-out;
+  transition: border-color 0.25s;
+}
+
+.mem-doc:hover { border-color: var(--cyan-dim); }
+
+.mem-doc-icon {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 18px;
+  color: var(--cyan);
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--cyan-dim);
+  border-radius: 4px;
+  background: rgba(0, 229, 255, 0.04);
+}
+
+.mem-doc-info { flex: 1; min-width: 0; }
+
+.mem-doc-name {
+  font-family: 'Rajdhani', sans-serif;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 2px;
+}
+
+.mem-doc-meta {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 11px;
+  color: var(--text-dim);
+  letter-spacing: 1px;
+}
+
+.mem-doc-preview {
+  font-family: 'Rajdhani', sans-serif;
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-top: 4px;
+  line-height: 1.4;
+}
+
+.mem-doc-actions { display: flex; gap: 6px; flex-shrink: 0; }
+
+.mem-delete-btn {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--danger);
+  background: transparent;
+  border: 1px solid rgba(255, 51, 102, 0.2);
+  border-radius: 3px;
+  padding: 5px 10px;
+  cursor: pointer;
+  transition: all 0.25s;
+}
+
+.mem-delete-btn:hover {
+  background: rgba(255, 51, 102, 0.1);
+  border-color: var(--danger);
+}
+
+/* ── Drag & drop overlay ─────────────────────────────── */
+#drop-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+  background: rgba(6, 11, 26, 0.92);
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  pointer-events: none;
+}
+
+#drop-overlay.visible {
+  display: flex;
+}
+
+#drop-overlay .drop-icon {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 48px;
+  color: var(--cyan);
+  text-shadow: 0 0 30px var(--cyan-glow);
+  animation: corePulse 1s ease-in-out infinite;
+}
+
+#drop-overlay .drop-text {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 14px;
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  color: var(--cyan);
+}
+
+#drop-overlay .drop-border {
+  position: absolute;
+  inset: 20px;
+  border: 2px dashed var(--cyan-dim);
+  border-radius: 8px;
+}
+
 /* ── Responsive ───────────────────────────────────────── */
 @media (max-width: 768px) {
   #app { padding: 10px 14px; }
@@ -1095,6 +1239,11 @@ body::after {
 
 <div id="grid-bg"></div>
 <canvas id="particles"></canvas>
+<div id="drop-overlay">
+  <div class="drop-border"></div>
+  <div class="drop-icon">//</div>
+  <div class="drop-text">DROP FILE TO READ</div>
+</div>
 
 <div id="app">
   <!-- Header -->
@@ -1108,6 +1257,7 @@ body::after {
     <div id="tab-bar">
       <button class="tab-btn active" data-tab="chat" onclick="switchTab('chat')">CHAT</button>
       <button class="tab-btn" data-tab="calendar" onclick="switchTab('calendar')">CALENDAR</button>
+      <button class="tab-btn" data-tab="memory" onclick="switchTab('memory')">MEMORY</button>
     </div>
     <div id="header-right">
       <div id="status-badge">
@@ -1196,6 +1346,30 @@ body::after {
       <!-- Strategy panel (hidden until requested) -->
       <div id="cal-strategy-panel"></div>
     </div>
+
+    <!-- Memory / Knowledge Base -->
+    <div id="memory-view">
+      <div class="cal-header">
+        <h2>KNOWLEDGE BASE</h2>
+        <div class="cal-header-actions">
+          <button class="cal-action-btn" onclick="document.getElementById('memory-file-input').click()" title="Upload document to memory">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+            </svg>
+            UPLOAD
+          </button>
+          <button class="cal-action-btn" onclick="loadKnowledgeBase()" title="Refresh">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
+              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+            </svg>
+            REFRESH
+          </button>
+        </div>
+        <input type="file" id="memory-file-input" style="display:none" accept=".pdf,.doc,.docx,.txt,.csv,.md,.py,.json,.html,.htm,.rtf,.log" onchange="handleMemoryUpload(this)" />
+      </div>
+      <div class="cal-list" id="memory-list"></div>
+    </div>
   </div>
 
   <!-- Bottom bar -->
@@ -1226,6 +1400,23 @@ body::after {
         </svg>
         TYPE
       </button>
+      <button class="bar-btn" id="upload-btn" onclick="document.getElementById('file-input').click()" title="Upload a document">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+        </svg>
+        FILE
+      </button>
+      <button class="bar-btn" id="pause-btn" onclick="togglePause()" title="Pause/resume Marley's response">
+        <svg id="pause-icon" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+          <rect x="6" y="4" width="4" height="16"/>
+          <rect x="14" y="4" width="4" height="16"/>
+        </svg>
+        <svg id="resume-icon" viewBox="0 0 24 24" fill="currentColor" stroke="none" style="display:none">
+          <polygon points="5 3 19 12 5 21 5 3"/>
+        </svg>
+        <span id="pause-label">PAUSE</span>
+      </button>
+      <input type="file" id="file-input" style="display:none" accept=".pdf,.doc,.docx,.txt,.csv,.md,.py,.json,.html,.htm,.rtf,.log" onchange="handleFileUpload(this)" />
     </div>
 
     <!-- Collapsible text input -->
@@ -1261,6 +1452,8 @@ let wakeRecognition = null;
 let isWakeListening = false;
 let isCapturing = false;
 let marleyIsProcessing = false;
+let responsePaused = false;
+let pauseBuffer = [];
 let activeCapture = null; // reference to current speech recognition instance
 
 // Conversation mode: after wake word triggers, stay in continuous
@@ -1302,6 +1495,19 @@ function connect() {
     setStatus('online', 'ONLINE');
     document.getElementById('session-id').textContent =
       'SESSION ' + Math.random().toString(36).substring(2, 8).toUpperCase();
+    // Send location to server
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          ws.send(JSON.stringify({
+            type: 'location',
+            lat: pos.coords.latitude,
+            lon: pos.coords.longitude,
+          }));
+        },
+        () => {} // silently ignore if denied
+      );
+    }
   };
 
   ws.onmessage = (e) => {
@@ -1332,18 +1538,25 @@ function handleMessage(data) {
       if (!currentBubble) {
         currentBubble = addMessage('marley', '');
         currentRawText = '';
+        // Scroll so the top of this new message is visible
+        currentBubble.closest('.message').scrollIntoView({ behavior: 'smooth', block: 'start' });
         // Prepare TTS streaming for this response
         if (voiceEnabled) {
           resetTTS();
           ttsPlayIndex = 0;
           isSpeaking = true;
         }
+        // Show pause button
+        showPauseBtn(true);
       }
-      currentRawText += data.text;
-      currentBubble.innerHTML = renderMarkdown(currentRawText);
-      scrollChat();
-      // Feed chunk to TTS immediately — it will fire on sentence boundaries
-      if (voiceEnabled) ttsFeedChunk(data.text);
+      if (responsePaused) {
+        // Buffer text while paused
+        pauseBuffer.push(data.text);
+      } else {
+        currentRawText += data.text;
+        currentBubble.innerHTML = renderMarkdown(currentRawText);
+        if (voiceEnabled) ttsFeedChunk(data.text);
+      }
       break;
 
     case 'session_saved':
@@ -1353,16 +1566,22 @@ function handleMessage(data) {
 
     case 'done':
       marleyIsProcessing = false;
+      // Flush any paused buffer before finishing
+      if (pauseBuffer.length > 0) {
+        currentRawText += pauseBuffer.join('');
+        if (currentBubble) currentBubble.innerHTML = renderMarkdown(currentRawText);
+        pauseBuffer = [];
+      }
+      responsePaused = false;
+      showPauseBtn(false);
 
       if (currentRawText && voiceEnabled) {
-        // Flush remaining buffered text to TTS and set completion callback
+        // Flush remaining buffered text to TTS — only resume listening AFTER speech ends
+        // to prevent the mic from picking up Marley's own voice
+        stopConversationCapture();
         ttsFlush(() => {
           onResponseComplete();
         });
-        // Start listening while Marley speaks — user can interrupt
-        if (inConversation) {
-          setTimeout(() => startConversationCapture(), 300);
-        }
       } else {
         onResponseComplete();
       }
@@ -1379,6 +1598,9 @@ function handleMessage(data) {
       currentBubble = null;
       currentRawText = '';
       marleyIsProcessing = false;
+      responsePaused = false;
+      pauseBuffer = [];
+      showPauseBtn(false);
       onResponseComplete();
       break;
   }
@@ -1443,6 +1665,61 @@ function sendMessage() {
 function scrollChat() {
   const chat = document.getElementById('chat-area');
   chat.scrollTop = chat.scrollHeight;
+}
+
+// ── Pause / Resume ─────────────────────────────────────
+function showPauseBtn(visible) {
+  const btn = document.getElementById('pause-btn');
+  if (visible) {
+    btn.classList.add('visible');
+    updatePauseBtnUI();
+  } else {
+    btn.classList.remove('visible', 'paused');
+  }
+}
+
+function updatePauseBtnUI() {
+  const btn = document.getElementById('pause-btn');
+  const pauseIcon = document.getElementById('pause-icon');
+  const resumeIcon = document.getElementById('resume-icon');
+  const label = document.getElementById('pause-label');
+  if (responsePaused) {
+    btn.classList.add('paused');
+    pauseIcon.style.display = 'none';
+    resumeIcon.style.display = 'block';
+    label.textContent = 'RESUME';
+    setStatus('thinking', 'PAUSED');
+  } else {
+    btn.classList.remove('paused');
+    pauseIcon.style.display = 'block';
+    resumeIcon.style.display = 'none';
+    label.textContent = 'PAUSE';
+  }
+}
+
+function togglePause() {
+  if (!marleyIsProcessing) return;
+  responsePaused = !responsePaused;
+  updatePauseBtnUI();
+
+  if (responsePaused) {
+    // Pause TTS playback
+    if (currentAudio) currentAudio.pause();
+    setStatus('thinking', 'PAUSED');
+  } else {
+    // Resume — flush buffered text
+    if (pauseBuffer.length > 0 && currentBubble) {
+      const buffered = pauseBuffer.join('');
+      currentRawText += buffered;
+      currentBubble.innerHTML = renderMarkdown(currentRawText);
+      // Feed buffered text to TTS
+      if (voiceEnabled) ttsFeedChunk(buffered);
+      pauseBuffer = [];
+    }
+    // Resume TTS playback
+    if (currentAudio) currentAudio.play();
+    setStatus('searching', 'STREAMING');
+  }
 }
 
 // ── Ring tap ────────────────────────────────────────────
@@ -2024,12 +2301,10 @@ let calendarData = null;
 
 function switchTab(tab) {
   currentTab = tab;
-  // Update tab buttons
   document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.tab === tab);
   });
 
-  // Toggle views
   const chatElements = [
     document.getElementById('ring-container'),
     document.getElementById('live-transcript'),
@@ -2037,17 +2312,24 @@ function switchTab(tab) {
     document.getElementById('chat-area'),
   ];
   const calView = document.getElementById('calendar-view');
+  const memView = document.getElementById('memory-view');
   const bottomBar = document.getElementById('bottom-bar');
+
+  // Hide everything first
+  chatElements.forEach(el => { if (el) el.style.display = 'none'; });
+  calView.classList.remove('visible');
+  memView.classList.remove('visible');
+  bottomBar.style.display = 'none';
 
   if (tab === 'chat') {
     chatElements.forEach(el => { if (el) el.style.display = ''; });
-    calView.classList.remove('visible');
     bottomBar.style.display = '';
-  } else {
-    chatElements.forEach(el => { if (el) el.style.display = 'none'; });
+  } else if (tab === 'calendar') {
     calView.classList.add('visible');
-    bottomBar.style.display = 'none';
     if (!calendarData) refreshCalendar();
+  } else if (tab === 'memory') {
+    memView.classList.add('visible');
+    loadKnowledgeBase();
   }
 }
 
@@ -2184,7 +2466,7 @@ function renderAssignmentList(assignments) {
     const label = getUrgencyLabel(a.days_left);
 
     html += `
-      <div class="cal-assignment" ${a.url ? `onclick="window.open('${a.url}', '_blank')" style="cursor:pointer"` : ''}>
+      <div class="cal-assignment">
         <div class="cal-assignment-accent ${urgency}"></div>
         <div class="cal-assignment-body">
           <div class="cal-assignment-info">
@@ -2195,6 +2477,14 @@ function renderAssignmentList(assignments) {
               <span>${a.points} pts</span>
             </div>
           </div>
+          <button class="cal-action-btn" onclick="event.stopPropagation(); readAssignment(${a.id}, this)" title="Read assignment content">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+            READ
+          </button>
+          ${a.url ? `<a class="cal-action-btn" href="${a.url}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="Open in Canvas">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+            OPEN
+          </a>` : ''}
           <div class="cal-assignment-badge ${urgency}">${label}</div>
         </div>
       </div>`;
@@ -2233,38 +2523,335 @@ function getStrategy() {
     });
 }
 
+function readAssignment(assignmentId, btn) {
+  const panel = document.getElementById('cal-strategy-panel');
+  btn.classList.add('loading');
+  const origHTML = btn.innerHTML;
+  btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="animation: rotateArc 1s linear infinite"><polyline points="23 4 23 10 17 10"/></svg> READING...`;
+
+  fetch(`/api/calendar/assignment/${assignmentId}`)
+    .then(r => r.json())
+    .then(data => {
+      btn.classList.remove('loading');
+      btn.innerHTML = origHTML;
+
+      if (data.error) {
+        panel.innerHTML = `<div class="cal-error">${escapeHtml(data.error)}</div>`;
+        return;
+      }
+
+      let contentHTML = `
+        <div class="cal-strategy">
+          <div class="cal-strategy-header">${escapeHtml(data.title)}</div>
+          <div class="cal-assignment-meta" style="margin-bottom:12px">
+            <span>${escapeHtml(data.course)}</span>
+            <span>${data.points} pts</span>
+          </div>`;
+
+      if (data.description) {
+        contentHTML += `
+          <div class="cal-strategy-body">
+            <strong>Instructions</strong>
+            <p>${renderMarkdown(data.description)}</p>
+          </div>`;
+      } else {
+        contentHTML += `<div class="cal-strategy-body"><p>No description provided for this assignment.</p></div>`;
+      }
+
+      if (data.attachments && data.attachments.length > 0) {
+        data.attachments.forEach(att => {
+          if (att.error) {
+            contentHTML += `<div class="cal-error" style="margin-top:8px">${escapeHtml(att.filename || att.url)}: ${escapeHtml(att.error)}</div>`;
+          } else {
+            contentHTML += `
+              <div style="margin-top:12px; padding-top:12px; border-top:1px solid var(--panel-border)">
+                <div class="cal-strategy-header" style="font-size:10px">${escapeHtml(att.filename)}</div>
+                <div class="cal-strategy-body"><pre style="white-space:pre-wrap; font-size:12px">${escapeHtml(att.content)}</pre></div>
+              </div>`;
+          }
+        });
+      }
+
+      contentHTML += `
+          <button class="cal-action-btn" style="margin-top:12px" onclick="speakContent(${assignmentId})" title="Have Marley read this aloud">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
+            READ ALOUD
+          </button>
+        </div>`;
+
+      panel.innerHTML = contentHTML;
+      panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+      // Store for speak
+      panel._contentData = data;
+    })
+    .catch(err => {
+      btn.classList.remove('loading');
+      btn.innerHTML = origHTML;
+      panel.innerHTML = `<div class="cal-error">Failed to read assignment: ${err.message}</div>`;
+    });
+}
+
+function speakContent(assignmentId) {
+  const panel = document.getElementById('cal-strategy-panel');
+  const data = panel._contentData;
+  if (!data) return;
+
+  let speech = `${data.title} for ${data.course.replace(/^2026 Fall\s*/i, '')}. `;
+  if (data.description) {
+    // Cap description for speech
+    const desc = data.description.substring(0, 500);
+    speech += desc + '. ';
+  }
+  if (data.attachments && data.attachments.length > 0) {
+    data.attachments.forEach(att => {
+      if (att.content && !att.error) {
+        speech += `Attached file: ${att.filename}. `;
+        // Read first ~400 chars of attachment
+        speech += att.content.substring(0, 400) + '. ';
+      }
+    });
+  }
+  speak(speech);
+}
+
 function speakAssignments() {
   if (!calendarData || !calendarData.length) {
-    speak('No upcoming assignments found, Devin.');
+    speak('No upcoming assignments found, Madeline.');
     return;
   }
 
-  // Build a natural speech summary
-  let speech = `You have ${calendarData.length} assignment${calendarData.length > 1 ? 's' : ''} coming up, Devin. `;
-  const urgent = calendarData.filter(a => a.days_left <= 1);
-  const soon = calendarData.filter(a => a.days_left > 1 && a.days_left <= 3);
+  let speech = `You have ${calendarData.length} assignment${calendarData.length > 1 ? 's' : ''} coming up. `;
 
-  if (urgent.length) {
-    speech += `${urgent.length} due within 24 hours. `;
-    urgent.forEach(a => {
-      speech += `${a.title} for ${a.course}, worth ${a.points} points. `;
-    });
-  }
-
-  if (soon.length) {
-    speech += `${soon.length} due within 3 days. `;
-    soon.forEach(a => {
-      speech += `${a.title} for ${a.course}, due ${a.due}. `;
-    });
-  }
-
-  const later = calendarData.filter(a => a.days_left > 3);
-  if (later.length) {
-    speech += `And ${later.length} more due later this week or beyond.`;
-  }
+  calendarData.forEach(a => {
+    // Just the course, assignment name, and when it's due
+    const course = a.course.replace(/^2026 Fall\s*/i, '');
+    speech += `${course}: ${a.title}, due ${a.due}. `;
+  });
 
   speak(speech);
 }
+
+// ── Knowledge base / Memory ─────────────────────────────
+function loadKnowledgeBase() {
+  const list = document.getElementById('memory-list');
+  list.innerHTML = '<div class="cal-loading">' + '<div class="cal-skeleton"></div>'.repeat(3) + '</div>';
+
+  fetch('/api/knowledge')
+    .then(r => r.json())
+    .then(data => {
+      if (!data.documents || !data.documents.length) {
+        list.innerHTML = `
+          <div class="cal-empty">
+            <div class="cal-empty-icon">//</div>
+            <h3>NO DOCUMENTS</h3>
+            <p>Upload syllabuses, notes, or reference materials. Marley will remember them across all conversations.</p>
+          </div>`;
+        return;
+      }
+
+      let html = `<h3 style="font-family:'Orbitron',sans-serif; font-size:12px; letter-spacing:4px; color:var(--cyan); margin-bottom:12px; padding:0 8px">${data.count} DOCUMENT${data.count > 1 ? 'S' : ''} IN MEMORY</h3>`;
+
+      data.documents.forEach(doc => {
+        const sizeKB = Math.round(doc.size / 1024);
+        html += `
+          <div class="mem-doc">
+            <div class="mem-doc-icon">M</div>
+            <div class="mem-doc-info">
+              <div class="mem-doc-name">${escapeHtml(doc.name.replace(/_/g, ' '))}</div>
+              <div class="mem-doc-meta">${sizeKB}KB // ${doc.filename}</div>
+              <div class="mem-doc-preview">${escapeHtml(doc.preview)}...</div>
+            </div>
+            <div class="mem-doc-actions">
+              <button class="mem-delete-btn" onclick="deleteKnowledge('${escapeHtml(doc.name)}')">DELETE</button>
+            </div>
+          </div>`;
+      });
+
+      list.innerHTML = html;
+    })
+    .catch(err => {
+      list.innerHTML = `<div class="cal-error">Failed to load knowledge base: ${err.message}</div>`;
+    });
+}
+
+function handleMemoryUpload(input) {
+  const file = input.files[0];
+  if (!file) return;
+  input.value = '';
+
+  const name = prompt('Name this document (e.g. "Physics Syllabus"):', file.name.replace(/\.[^.]+$/, ''));
+  if (!name) return;
+
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('name', name);
+
+  const list = document.getElementById('memory-list');
+  list.innerHTML = '<div class="cal-loading"><div class="cal-skeleton"></div></div>';
+
+  fetch('/api/knowledge/upload', { method: 'POST', body: formData })
+    .then(r => r.json())
+    .then(data => {
+      if (data.error) {
+        list.innerHTML = `<div class="cal-error">${escapeHtml(data.error)}</div>`;
+      } else {
+        loadKnowledgeBase();
+      }
+    })
+    .catch(err => {
+      list.innerHTML = `<div class="cal-error">Upload failed: ${err.message}</div>`;
+    });
+}
+
+function deleteKnowledge(name) {
+  if (!confirm(`Remove "${name.replace(/_/g, ' ')}" from Marley's memory?`)) return;
+
+  fetch(`/api/knowledge/${name}`, { method: 'DELETE' })
+    .then(r => r.json())
+    .then(data => {
+      if (data.error) {
+        alert(data.error);
+      }
+      loadKnowledgeBase();
+    });
+}
+
+// ── File upload ─────────────────────────────────────────
+function handleFileUpload(input) {
+  const file = input.files[0];
+  if (!file) return;
+  input.value = ''; // reset so same file can be re-uploaded
+  uploadAndRead(file);
+}
+
+function uploadAndRead(file, saveToMemory = false) {
+  addMessage('user', `[Uploaded: ${file.name}]`);
+  setStatus('searching', 'READING DOCUMENT');
+  setRingState('active');
+  marleyIsProcessing = true;
+
+  // If saving to memory, upload directly to knowledge base
+  if (saveToMemory) {
+    const formData = new FormData();
+    formData.append('file', file);
+    fetch('/api/knowledge/upload', { method: 'POST', body: formData })
+      .then(r => r.json())
+      .then(data => {
+        if (data.error) {
+          addMessage('marley', `Couldn't save to memory: ${data.error}`);
+        } else {
+          // Also send to chat for discussion
+          const prompt = `I've permanently saved "${file.name}" to my knowledge base as "${data.saved}". I now have this document in my memory for all future conversations. What would you like to know about it?`;
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ message: prompt }));
+            enterConversation();
+            return;
+          }
+        }
+        setStatus('online', 'ONLINE');
+        setRingState('idle');
+        marleyIsProcessing = false;
+      })
+      .catch(err => {
+        addMessage('marley', `Save failed: ${err.message}`);
+        setStatus('online', 'ONLINE');
+        setRingState('idle');
+        marleyIsProcessing = false;
+      });
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append('file', file);
+
+  fetch('/api/upload', { method: 'POST', body: formData })
+    .then(r => r.json())
+    .then(data => {
+      if (data.error) {
+        addMessage('marley', `I couldn't read that file: ${data.error}`);
+        setStatus('online', 'ONLINE');
+        setRingState('idle');
+        marleyIsProcessing = false;
+        return;
+      }
+
+      // Store for potential save-to-memory
+      lastUploadData = { filename: data.filename, content: data.content };
+
+      // Send the extracted text to Marley via chat so she can discuss it
+      const prompt = `I just uploaded a file called "${data.filename}" (${data.type}, ${data.length} characters${data.truncated ? ', truncated' : ''}). Here is the content:\n\n---\n${data.content}\n---\n\nPlease read through this and give me a summary of what it contains.`;
+
+      // Send directly through WebSocket
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ message: prompt }));
+        enterConversation();
+      }
+    })
+    .catch(err => {
+      addMessage('marley', `Upload failed: ${err.message}`);
+      setStatus('online', 'ONLINE');
+      setRingState('idle');
+      marleyIsProcessing = false;
+    });
+}
+
+let lastUploadData = null;
+
+function saveLastUploadToMemory() {
+  if (!lastUploadData) return;
+  const name = prompt('Name this document (e.g. "Physics Syllabus"):', lastUploadData.filename);
+  if (!name) return;
+
+  fetch('/api/knowledge/save', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: name, content: lastUploadData.content }),
+  })
+  .then(r => r.json())
+  .then(data => {
+    if (data.error) {
+      addMessage('marley', `Couldn't save: ${data.error}`);
+    } else {
+      addMessage('marley', `Saved "${name}" to my permanent memory. I'll remember this across all conversations.`);
+    }
+  });
+}
+
+// ── Drag & drop ─────────────────────────────────────────
+let dragCounter = 0;
+
+document.addEventListener('dragenter', (e) => {
+  e.preventDefault();
+  dragCounter++;
+  document.getElementById('drop-overlay').classList.add('visible');
+});
+
+document.addEventListener('dragleave', (e) => {
+  e.preventDefault();
+  dragCounter--;
+  if (dragCounter <= 0) {
+    dragCounter = 0;
+    document.getElementById('drop-overlay').classList.remove('visible');
+  }
+});
+
+document.addEventListener('dragover', (e) => {
+  e.preventDefault();
+});
+
+document.addEventListener('drop', (e) => {
+  e.preventDefault();
+  dragCounter = 0;
+  document.getElementById('drop-overlay').classList.remove('visible');
+
+  const file = e.dataTransfer.files[0];
+  if (file) {
+    // Switch to chat tab if on calendar
+    if (currentTab !== 'chat') switchTab('chat');
+    uploadAndRead(file);
+  }
+});
 
 // ── Init ────────────────────────────────────────────────
 document.getElementById('vox-btn').classList.add('active');

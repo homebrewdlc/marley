@@ -679,3 +679,178 @@ def get_assignment_detail(search: str) -> dict | None:
             return a
 
     return None
+
+
+def get_assignment_content(assignment_id: int) -> dict:
+    """Fetch full assignment content including description and file attachments.
+
+    Returns the full description text and downloads any attached files,
+    extracting text content from PDFs, docs, and text files.
+    """
+    cookies = _load_cookies()
+    if not cookies:
+        raise ValueError("Not logged into Canvas. Say 'log into Canvas' to authenticate.")
+
+    # We need to find which course this assignment belongs to
+    courses = _api_get("/api/v1/courses", {"enrollment_state": "active", "per_page": 50}, cookies)
+    if not isinstance(courses, list):
+        raise ValueError("Could not fetch courses.")
+
+    assignment_data = None
+    course_id = None
+
+    for course in courses:
+        if not isinstance(course, dict) or "id" not in course:
+            continue
+        try:
+            a = _api_get(f"/api/v1/courses/{course['id']}/assignments/{assignment_id}", {}, cookies)
+            if isinstance(a, dict) and a.get("id") == assignment_id:
+                assignment_data = a
+                course_id = course["id"]
+                break
+        except Exception:
+            continue
+
+    if not assignment_data:
+        raise ValueError(f"Assignment {assignment_id} not found.")
+
+    course_name = next(
+        (c.get("name", "Unknown") for c in courses if c.get("id") == course_id),
+        "Unknown",
+    )
+
+    # Full description (HTML → plain text)
+    raw_desc = assignment_data.get("description") or ""
+    description = _strip_html(raw_desc)
+
+    result = {
+        "id": assignment_id,
+        "title": assignment_data.get("name", "Unnamed"),
+        "course": course_name,
+        "description": description,
+        "points": assignment_data.get("points_possible", "?"),
+        "due": assignment_data.get("due_at", ""),
+        "submission_types": assignment_data.get("submission_types", []),
+        "url": assignment_data.get("html_url", ""),
+        "attachments": [],
+    }
+
+    # Fetch any file attachments on the assignment itself
+    _fetch_attachments(assignment_data, result, cookies)
+
+    return result
+
+
+def _fetch_attachments(assignment_data: dict, result: dict, cookies: dict):
+    """Download and extract text from assignment attachments."""
+    import tempfile
+
+    # Canvas can have attachments in the assignment description as links,
+    # or via the rubric/external tools. Check for direct file references.
+    # Also check for linked files in the description HTML.
+    raw_desc = assignment_data.get("description") or ""
+
+    # Find file download links in the description HTML
+    file_urls = re.findall(
+        r'href="([^"]*(?:/files/\d+|\.pdf|\.docx?|\.txt|\.rtf)[^"]*)"',
+        raw_desc,
+        re.IGNORECASE,
+    )
+
+    # Also check the Canvas files API for the course
+    canvas_url = _canvas_url()
+
+    for url in file_urls:
+        # Make absolute
+        if url.startswith("/"):
+            url = canvas_url + url
+        elif not url.startswith("http"):
+            continue
+
+        try:
+            # Follow redirects to get the actual file
+            resp = requests.get(url, cookies=cookies, timeout=30, allow_redirects=True)
+            if resp.status_code != 200:
+                result["attachments"].append({
+                    "url": url,
+                    "error": f"Download failed: HTTP {resp.status_code}",
+                })
+                continue
+
+            content_type = resp.headers.get("content-type", "")
+            filename = _extract_filename(resp, url)
+
+            # Extract text based on file type
+            text = ""
+            if "pdf" in content_type or filename.lower().endswith(".pdf"):
+                text = _extract_pdf_text(resp.content)
+            elif filename.lower().endswith((".txt", ".rtf", ".csv", ".md")):
+                text = resp.text[:10000]
+            elif filename.lower().endswith((".doc", ".docx")):
+                text = _extract_docx_text(resp.content)
+            else:
+                text = f"[File type not supported for text extraction: {content_type}]"
+
+            result["attachments"].append({
+                "filename": filename,
+                "content": text[:8000],  # cap to avoid huge payloads
+            })
+        except Exception as e:
+            result["attachments"].append({
+                "url": url,
+                "error": str(e),
+            })
+
+
+def _extract_filename(resp, url: str) -> str:
+    """Get filename from Content-Disposition header or URL."""
+    cd = resp.headers.get("content-disposition", "")
+    match = re.search(r'filename="?([^";\n]+)"?', cd)
+    if match:
+        return match.group(1).strip()
+    # Fallback: last segment of URL path
+    from urllib.parse import urlparse, unquote
+    path = urlparse(url).path
+    return unquote(path.split("/")[-1]) or "unknown_file"
+
+
+def _extract_pdf_text(content: bytes) -> str:
+    """Extract text from PDF bytes."""
+    try:
+        import io
+        # Try PyPDF2 / pypdf
+        try:
+            from pypdf import PdfReader
+        except ImportError:
+            from PyPDF2 import PdfReader
+
+        reader = PdfReader(io.BytesIO(content))
+        text = ""
+        for page in reader.pages[:20]:  # cap at 20 pages
+            text += page.extract_text() or ""
+            text += "\n"
+        return text.strip() or "[PDF contained no extractable text]"
+    except ImportError:
+        return "[PDF reader not installed — run: pip install pypdf]"
+    except Exception as e:
+        return f"[PDF extraction failed: {e}]"
+
+
+def _extract_docx_text(content: bytes) -> str:
+    """Extract text from DOCX bytes."""
+    try:
+        import io
+        import zipfile
+        import xml.etree.ElementTree as ET
+
+        # DOCX is a zip containing XML
+        z = zipfile.ZipFile(io.BytesIO(content))
+        xml_content = z.read("word/document.xml")
+        tree = ET.fromstring(xml_content)
+
+        # Extract all text from w:t elements
+        ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+        texts = [t.text for t in tree.iter(f"{{{ns['w']}}}t") if t.text]
+        return " ".join(texts).strip() or "[DOCX contained no extractable text]"
+    except Exception as e:
+        return f"[DOCX extraction failed: {e}]"

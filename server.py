@@ -13,14 +13,15 @@ from datetime import datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, UploadFile, File
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
 import anthropic
 import httpx
 
 from canvas import (
     get_assignments, get_grades, get_assignment_detail,
+    get_assignment_content,
     start_canvas_login, submit_2fa_code, get_auth_status,
     has_valid_session, clear_cookies, is_configured,
     save_canvas_setup, get_canvas_url,
@@ -33,6 +34,7 @@ client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
 # In-memory conversation sessions
 sessions: dict[str, list] = {}
+session_locations: dict[str, str] = {}  # session_id -> human-readable location
 
 # ── Brain repo (for conversation logs) ───────────────────
 BRAIN_REPO = Path.home() / "claude_brain"
@@ -65,7 +67,7 @@ def save_and_push_conversation(messages: list) -> str:
         # Skip tool results
         if isinstance(msg.get("content"), list):
             continue
-        label = "DEVIN" if role == "USER" else "MARLEY"
+        label = "MADELINE" if role == "USER" else "MARLEY"
         lines.append(f"**{label}:** {content}")
         lines.append("")
 
@@ -91,6 +93,50 @@ def save_and_push_conversation(messages: list) -> str:
             return f"Conversation saved locally ({filename}) but push failed: {result.stderr.strip()[:200]}"
     except Exception as e:
         return f"Conversation saved locally ({filename}) but git error: {e}"
+
+
+# ── Knowledge base ──────────────────────────────────────
+KNOWLEDGE_DIR = Path(__file__).parent / "knowledge"
+KNOWLEDGE_DIR.mkdir(exist_ok=True)
+
+
+def load_knowledge() -> str:
+    """Load all knowledge base files into a single context string."""
+    docs = []
+    for f in sorted(KNOWLEDGE_DIR.glob("*.txt")):
+        try:
+            content = f.read_text().strip()
+            if content:
+                label = f.stem.replace("_", " ").title()
+                docs.append(f"### {label}\n{content}")
+        except Exception:
+            continue
+    if not docs:
+        return ""
+    return "\n\n## KNOWLEDGE BASE — Stored Documents\n\n" + "\n\n---\n\n".join(docs) + "\n\n---\n"
+
+
+async def reverse_geocode(lat: float, lon: float) -> str:
+    """Reverse geocode coordinates to a human-readable location via Nominatim."""
+    try:
+        async with httpx.AsyncClient() as http:
+            resp = await http.get(
+                "https://nominatim.openstreetmap.org/reverse",
+                params={"lat": lat, "lon": lon, "format": "json", "zoom": 10},
+                headers={"User-Agent": "MARLEY-Assistant/1.0"},
+                timeout=5.0,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                addr = data.get("address", {})
+                city = addr.get("city") or addr.get("town") or addr.get("village") or addr.get("county", "")
+                state = addr.get("state", "")
+                country = addr.get("country", "")
+                parts = [p for p in [city, state, country] if p]
+                return ", ".join(parts) if parts else f"{lat:.2f}, {lon:.2f}"
+    except Exception:
+        pass
+    return f"{lat:.2f}, {lon:.2f}"
 
 
 # ── Database paths ───────────────────────────────────────
@@ -247,6 +293,20 @@ TOOLS = [
         },
     },
     {
+        "name": "read_assignment",
+        "description": "Read the full content of a Canvas assignment — downloads and extracts text from the assignment description and any attached files (PDFs, docs, etc). Use when the user wants to read, review, or understand a specific assignment's content, instructions, or attached documents.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "assignment_id": {
+                    "type": "integer",
+                    "description": "The Canvas assignment ID to read. Get this from check_canvas first.",
+                },
+            },
+            "required": ["assignment_id"],
+        },
+    },
+    {
         "name": "canvas_setup",
         "description": "Configure Canvas LMS for the first time. Use when the user provides their school's Canvas URL, email, and password. Stores credentials locally on their machine (never sent anywhere). Use this BEFORE canvas_login if Canvas is not yet configured.",
         "input_schema": {
@@ -292,6 +352,20 @@ TOOLS = [
                 },
             },
             "required": ["command"],
+        },
+    },
+    {
+        "name": "read_link",
+        "description": "Download and read the contents of a URL — PDFs, documents, or web pages. Use when the user pastes a link and wants you to read, summarise, or discuss it. Handles PDFs, DOCX, plain text, and HTML pages.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "description": "The URL to download and read",
+                },
+            },
+            "required": ["url"],
         },
     },
 ]
@@ -516,6 +590,76 @@ def tool_run_command(command: str, background: bool = False) -> str:
         return json.dumps({"error": str(e)})
 
 
+def tool_read_link(url: str) -> str:
+    """Download a URL and extract readable text content."""
+    import requests as req
+    from canvas import _extract_pdf_text, _extract_docx_text, _strip_html
+
+    try:
+        resp = req.get(url, timeout=30, allow_redirects=True, headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        })
+        if resp.status_code != 200:
+            return json.dumps({"error": f"Download failed: HTTP {resp.status_code}"})
+
+        content_type = resp.headers.get("content-type", "").lower()
+
+        # Determine file type from content-type or URL
+        url_lower = url.lower()
+
+        if "pdf" in content_type or url_lower.endswith(".pdf"):
+            text = _extract_pdf_text(resp.content)
+            return json.dumps({
+                "type": "pdf",
+                "url": url,
+                "content": text[:15000],
+                "length": len(text),
+                "truncated": len(text) > 15000,
+            })
+
+        elif url_lower.endswith((".docx", ".doc")) or "wordprocessing" in content_type:
+            text = _extract_docx_text(resp.content)
+            return json.dumps({
+                "type": "docx",
+                "url": url,
+                "content": text[:15000],
+                "length": len(text),
+                "truncated": len(text) > 15000,
+            })
+
+        elif url_lower.endswith((".txt", ".csv", ".md", ".py", ".json")) or "text/plain" in content_type:
+            text = resp.text[:15000]
+            return json.dumps({
+                "type": "text",
+                "url": url,
+                "content": text,
+                "length": len(resp.text),
+                "truncated": len(resp.text) > 15000,
+            })
+
+        elif "html" in content_type:
+            # Web page — strip HTML tags to get readable text
+            text = _strip_html(resp.text)
+            return json.dumps({
+                "type": "webpage",
+                "url": url,
+                "content": text[:15000],
+                "length": len(text),
+                "truncated": len(text) > 15000,
+            })
+
+        else:
+            return json.dumps({
+                "error": f"Unsupported content type: {content_type}",
+                "url": url,
+            })
+
+    except req.Timeout:
+        return json.dumps({"error": "Download timed out after 30 seconds"})
+    except Exception as e:
+        return json.dumps({"error": f"Failed to read link: {e}"})
+
+
 def tool_check_canvas(query: str, search: str = "") -> str:
     try:
         if query == "assignments":
@@ -541,6 +685,16 @@ def tool_check_canvas(query: str, search: str = "") -> str:
         return json.dumps({"error": f"Unknown query: {query}"})
     except ValueError as e:
         return json.dumps({"error": str(e)})
+
+
+def tool_read_assignment(assignment_id: int) -> str:
+    try:
+        content = get_assignment_content(assignment_id)
+        return json.dumps(content, default=str)
+    except ValueError as e:
+        return json.dumps({"error": str(e)})
+    except Exception as e:
+        return json.dumps({"error": f"Failed to read assignment: {e}"})
 
 
 def tool_canvas_setup(canvas_url: str, email: str, password: str) -> str:
@@ -571,19 +725,23 @@ def execute_tool(name: str, input_data: dict) -> str:
         return tool_check_youtube(input_data["query"])
     elif name == "check_canvas":
         return tool_check_canvas(input_data.get("query", "assignments"), input_data.get("search", ""))
+    elif name == "read_assignment":
+        return tool_read_assignment(input_data["assignment_id"])
     elif name == "canvas_setup":
         return tool_canvas_setup(input_data["canvas_url"], input_data["email"], input_data["password"])
     elif name == "canvas_login":
         return tool_canvas_login()
     elif name == "run_command":
         return tool_run_command(input_data["command"], input_data.get("background", False))
+    elif name == "read_link":
+        return tool_read_link(input_data["url"])
     return json.dumps({"error": f"Unknown tool: {name}"})
 
 
 # ── System prompt ────────────────────────────────────────
 SYSTEM_PROMPT = """You are MARLEY, a highly advanced personal AI assistant — like JARVIS or FRIDAY from the Marvel universe. You are loyal, sharp, and deeply integrated into your user's digital life.
 
-Your user's name is Devin. You run on his Linux workstation (Fedora, Hyprland WM).
+Your user's name is Madeline. You run on her Linux workstation (Fedora, Hyprland WM).
 
 ## Your personality
 - Male persona — like JARVIS. Calm, composed, British-dry wit, deeply competent
@@ -591,7 +749,7 @@ Your user's name is Devin. You run on his Linux workstation (Fedora, Hyprland WM
 - Direct and efficient — give concise answers unless detail is requested
 - Proactive — if you notice something important in the data, mention it
 - Conversational — this is a natural dialogue, not a Q&A bot
-- Address the user as "Devin" or "sir" naturally, like JARVIS addresses Tony Stark
+- Address the user as "Madeline" or "ma'am" naturally, like JARVIS addresses Tony Stark
 - When asked casually ("how's the trader doing?"), give a brief natural summary, not a data dump
 
 ## Your capabilities
@@ -609,16 +767,19 @@ You have access to these systems on this machine:
 
 **Shell Access** — You can run shell commands for system checks, file operations, or launching tools. You can launch Claude Code (`claude -p "prompt"`) to build things.
 
+**Link/Document Reader** — You can read any URL the user sends you. Use read_link to download and extract text from PDFs, Word docs, web pages, or plain text files. When the user pastes a link or asks you to read something, use this tool. You can also use read_assignment to read the full content of a Canvas assignment by ID.
+
 ## How to respond
 - For casual questions about systems, use the appropriate tool and summarize naturally
 - For homework/school questions, use check_canvas — summarize naturally, highlight urgency
+- When the user sends a URL or asks you to read a link/PDF/document, use read_link immediately
 - If Canvas returns "not configured", ask for the school's Canvas URL, email, and password, then use canvas_setup
 - If Canvas returns "not logged in" or "session expired", do NOT automatically call canvas_login. Instead, tell the user their Canvas session needs to be refreshed and ask them to say "log into Canvas" when they are ready (they will need to approve a 2FA push on their phone). Only call canvas_login when the user explicitly asks to log in.
 - For general knowledge or current events, use web search
 - For building/coding requests, you can launch Claude Code with `run_command`
 - Keep responses conversational unless the user wants detail
 - You can see all agents, start/stop them, and check their health
-- If the trading bot or any service is down, let Devin know proactively when he asks about it"""
+- If the trading bot or any service is down, let Madeline know proactively when she asks about it"""
 
 
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "")
@@ -661,17 +822,17 @@ async def calendar_strategy(request: Request):
         for a in assignments
     )
 
-    strategy_prompt = f"""Here are Devin's upcoming assignments:
+    strategy_prompt = f"""Here are Madeline's upcoming assignments:
 
 {assignment_text}
 
-Give Devin a concise, actionable weekly strategy for tackling these assignments. Consider:
+Give Madeline a concise, actionable weekly strategy for tackling these assignments. Consider:
 - Urgency (what's due soonest)
 - Point value (high-value assignments deserve more time)
 - Logical grouping (similar subjects back to back)
 - Realistic daily workload
 
-Be direct, no fluff. Address him as Devin. No emojis. Format with clear day-by-day or priority-based structure."""
+Be direct, no fluff. Address her as Madeline. No emojis. Format with clear day-by-day or priority-based structure."""
 
     try:
         response = client.messages.create(
@@ -684,6 +845,137 @@ Be direct, no fluff. Address him as Devin. No emojis. Format with clear day-by-d
         return {"strategy": strategy_text, "assignment_count": len(assignments)}
     except Exception as e:
         return {"error": f"Strategy generation failed: {e}"}
+
+
+@app.get("/api/calendar/assignment/{assignment_id}")
+async def calendar_assignment_content(assignment_id: int):
+    """Fetch full content of a specific assignment including attachments."""
+    try:
+        content = get_assignment_content(assignment_id)
+        return content
+    except ValueError as e:
+        return {"error": str(e)}
+    except Exception as e:
+        return {"error": f"Failed to fetch assignment content: {e}"}
+
+
+@app.get("/api/knowledge")
+async def list_knowledge():
+    """List all documents in the knowledge base."""
+    docs = []
+    for f in sorted(KNOWLEDGE_DIR.glob("*.txt")):
+        try:
+            content = f.read_text()
+            docs.append({
+                "name": f.stem,
+                "filename": f.name,
+                "size": len(content),
+                "preview": content[:200],
+            })
+        except Exception:
+            continue
+    return {"documents": docs, "count": len(docs)}
+
+
+@app.post("/api/knowledge/save")
+async def save_to_knowledge(request: Request):
+    """Save text content to the knowledge base permanently."""
+    body = await request.json()
+    name = body.get("name", "").strip()
+    content = body.get("content", "").strip()
+    if not name or not content:
+        return JSONResponse({"error": "Name and content are required."}, status_code=400)
+
+    # Sanitize filename
+    safe_name = re.sub(r'[^\w\s\-]', '', name).strip().replace(' ', '_').lower()
+    if not safe_name:
+        safe_name = "document"
+
+    filepath = KNOWLEDGE_DIR / f"{safe_name}.txt"
+    filepath.write_text(content)
+    return {"saved": safe_name, "size": len(content), "path": str(filepath)}
+
+
+@app.post("/api/knowledge/upload")
+async def upload_to_knowledge(file: UploadFile = File(...), name: str = ""):
+    """Upload a file directly to the knowledge base."""
+    from canvas import _extract_pdf_text, _extract_docx_text, _strip_html
+
+    content = await file.read()
+    filename = file.filename or "unknown"
+    ct = (file.content_type or "").lower()
+    fname_lower = filename.lower()
+
+    try:
+        if "pdf" in ct or fname_lower.endswith(".pdf"):
+            text = _extract_pdf_text(content)
+        elif fname_lower.endswith((".docx",)) or "wordprocessing" in ct:
+            text = _extract_docx_text(content)
+        elif fname_lower.endswith((".txt", ".csv", ".md", ".py", ".json", ".rtf", ".log")):
+            text = content.decode("utf-8", errors="replace")
+        elif "html" in ct or fname_lower.endswith((".html", ".htm")):
+            text = _strip_html(content.decode("utf-8", errors="replace"))
+        else:
+            return JSONResponse({"error": f"Unsupported file type: {filename}"}, status_code=400)
+
+        # Use provided name or derive from filename
+        doc_name = name.strip() if name.strip() else Path(filename).stem
+        safe_name = re.sub(r'[^\w\s\-]', '', doc_name).strip().replace(' ', '_').lower()
+        if not safe_name:
+            safe_name = "document"
+
+        filepath = KNOWLEDGE_DIR / f"{safe_name}.txt"
+        filepath.write_text(text)
+        return {"saved": safe_name, "filename": filename, "size": len(text), "path": str(filepath)}
+    except Exception as e:
+        return JSONResponse({"error": f"Failed to process file: {e}"}, status_code=500)
+
+
+@app.delete("/api/knowledge/{name}")
+async def delete_knowledge(name: str):
+    """Remove a document from the knowledge base."""
+    filepath = KNOWLEDGE_DIR / f"{name}.txt"
+    if filepath.exists():
+        filepath.unlink()
+        return {"deleted": name}
+    return JSONResponse({"error": f"Document '{name}' not found."}, status_code=404)
+
+
+@app.post("/api/upload")
+async def upload_file(file: UploadFile = File(...)):
+    """Upload a file and extract its text content."""
+    from canvas import _extract_pdf_text, _extract_docx_text, _strip_html
+
+    content = await file.read()
+    filename = file.filename or "unknown"
+    ct = (file.content_type or "").lower()
+    fname_lower = filename.lower()
+
+    try:
+        if "pdf" in ct or fname_lower.endswith(".pdf"):
+            text = _extract_pdf_text(content)
+            ftype = "pdf"
+        elif fname_lower.endswith((".docx",)) or "wordprocessing" in ct:
+            text = _extract_docx_text(content)
+            ftype = "docx"
+        elif fname_lower.endswith((".txt", ".csv", ".md", ".py", ".json", ".rtf", ".log")):
+            text = content.decode("utf-8", errors="replace")[:15000]
+            ftype = "text"
+        elif "html" in ct or fname_lower.endswith((".html", ".htm")):
+            text = _strip_html(content.decode("utf-8", errors="replace"))[:15000]
+            ftype = "html"
+        else:
+            return JSONResponse({"error": f"Unsupported file type: {filename} ({ct})"}, status_code=400)
+
+        return {
+            "filename": filename,
+            "type": ftype,
+            "content": text[:15000],
+            "length": len(text),
+            "truncated": len(text) > 15000,
+        }
+    except Exception as e:
+        return JSONResponse({"error": f"Failed to read file: {e}"}, status_code=500)
 
 
 @app.post("/api/tts")
@@ -746,6 +1038,16 @@ async def websocket_endpoint(ws: WebSocket):
     try:
         while True:
             data = json.loads(await ws.receive_text())
+
+            # Handle location update from browser geolocation
+            if data.get("type") == "location":
+                lat = data.get("lat")
+                lon = data.get("lon")
+                if lat is not None and lon is not None:
+                    location_str = await reverse_geocode(lat, lon)
+                    session_locations[session_id] = location_str
+                continue
+
             user_msg = data.get("message", "").strip()
             if not user_msg:
                 continue
@@ -755,7 +1057,7 @@ async def websocket_endpoint(ws: WebSocket):
             # ── End phrase detection ────────────────────────
             if END_PHRASES.search(user_msg):
                 save_result = save_and_push_conversation(sessions[session_id])
-                farewell = f"Very good, Devin. Session logged and pushed.\n\n*{save_result}*\n\nI'll be here if you need me, sir."
+                farewell = f"Very good, Madeline. Session logged and pushed.\n\n*{save_result}*\n\nI'll be here if you need me, ma'am."
                 sessions[session_id].append({"role": "assistant", "content": farewell})
                 # Stream the farewell
                 for chunk in [farewell]:
@@ -778,10 +1080,18 @@ async def websocket_endpoint(ws: WebSocket):
                     current_tool_name = None
                     current_tool_input = ""
 
+                    # Inject knowledge base and location into system prompt
+                    knowledge = load_knowledge()
+                    full_system = SYSTEM_PROMPT + knowledge if knowledge else SYSTEM_PROMPT
+                    loc = session_locations.get(session_id)
+                    if loc:
+                        now = datetime.now()
+                        full_system += f"\n\n## Current context\n- Location: {loc}\n- Local time: {now.strftime('%A, %B %d, %Y %I:%M %p')}"
+
                     with client.messages.stream(
                         model="claude-haiku-4-5-20251001",
                         max_tokens=8192,
-                        system=SYSTEM_PROMPT,
+                        system=full_system,
                         tools=TOOLS,
                         messages=messages,
                     ) as stream:
@@ -808,6 +1118,8 @@ async def websocket_endpoint(ws: WebSocket):
                                             "check_youtube": "CHECKING YOUTUBE",
                                             "check_canvas": "CHECKING CANVAS",
                                             "canvas_setup": "CONFIGURING CANVAS",
+                                            "read_assignment": "READING ASSIGNMENT",
+                                            "read_link": "READING DOCUMENT",
                                             "canvas_login": "LOGGING INTO CANVAS",
                                             "run_command": "RUNNING COMMAND",
                                         }.get(block.name, "WORKING")
@@ -904,8 +1216,8 @@ async def websocket_endpoint(ws: WebSocket):
                 }))
 
     except WebSocketDisconnect:
-        if session_id in sessions:
-            del sessions[session_id]
+        sessions.pop(session_id, None)
+        session_locations.pop(session_id, None)
 
 
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
@@ -914,5 +1226,16 @@ app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), na
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 7777))
-    print(f"\n  🧠 MARLEY is online at http://localhost:{port}\n")
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    cert_dir = Path(__file__).parent / "cert"
+    ssl_key = cert_dir / "key.pem"
+    ssl_cert = cert_dir / "cert.pem"
+
+    if ssl_key.exists() and ssl_cert.exists():
+        print(f"\n  🧠 MARLEY is online at https://localhost:{port}\n")
+        uvicorn.run(app, host="0.0.0.0", port=port,
+                    ssl_keyfile=str(ssl_key), ssl_certfile=str(ssl_cert))
+    else:
+        print(f"\n  🧠 MARLEY is online at http://localhost:{port}\n")
+        print("  ⚠  No SSL certs found — voice input won't work over LAN")
+        print(f"     Run: openssl req -x509 -newkey rsa:2048 -keyout {ssl_key} -out {ssl_cert} -days 365 -nodes\n")
+        uvicorn.run(app, host="0.0.0.0", port=port)
