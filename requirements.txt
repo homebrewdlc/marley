@@ -6,3 +6,5 @@ requests
 playwright
 pypdf
 python-multipart
+edge-tts
+httpx

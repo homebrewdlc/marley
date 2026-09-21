@@ -2055,11 +2055,12 @@ function ttsFlush(onDone) {
   }
 }
 
+
+
 function fetchAndQueueTTS(sentence) {
   ttsFetching++;
   const queueIndex = ttsQueue.length;
   ttsQueue.push(null); // placeholder
-  console.log('[TTS] Fetching sentence:', sentence.slice(0, 60));
 
   fetch('/api/tts', {
     method: 'POST',
@@ -2067,19 +2068,16 @@ function fetchAndQueueTTS(sentence) {
     body: JSON.stringify({ text: sentence }),
   })
   .then(resp => {
-    console.log('[TTS] Response status:', resp.status, 'content-type:', resp.headers.get('content-type'));
-    if (!resp.ok) throw new Error('TTS HTTP ' + resp.status);
+    if (!resp.ok) throw new Error('TTS failed');
     return resp.blob();
   })
   .then(blob => {
     ttsFetching--;
-    console.log('[TTS] Got audio blob:', blob.size, 'bytes, type:', blob.type);
     if (!voiceEnabled) { checkTTSComplete(); return; }
     ttsQueue[queueIndex] = blob;
     playNextInQueue();
   })
-  .catch(err => {
-    console.error('[TTS] Fetch error:', err);
+  .catch(() => {
     ttsFetching--;
     ttsQueue[queueIndex] = 'skip';
     playNextInQueue();
@@ -2109,10 +2107,8 @@ function playNextInQueue() {
   const url = URL.createObjectURL(item);
   const audio = new Audio(url);
   currentAudio = audio;
-  console.log('[TTS] Playing queue index:', ttsPlayIndex);
 
   audio.onended = () => {
-    console.log('[TTS] Playback ended');
     ttsPlaying = false;
     currentAudio = null;
     URL.revokeObjectURL(url);
@@ -2120,8 +2116,7 @@ function playNextInQueue() {
     playNextInQueue();
   };
 
-  audio.onerror = (e) => {
-    console.error('[TTS] Audio playback error:', e);
+  audio.onerror = () => {
     ttsPlaying = false;
     currentAudio = null;
     URL.revokeObjectURL(url);
@@ -2129,8 +2124,7 @@ function playNextInQueue() {
     playNextInQueue();
   };
 
-  audio.play().catch(err => {
-    console.error('[TTS] audio.play() rejected:', err);
+  audio.play().catch(() => {
     ttsPlaying = false;
     currentAudio = null;
     ttsPlayIndex++;
