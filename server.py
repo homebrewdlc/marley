@@ -782,8 +782,7 @@ You have access to these systems on this machine:
 - If the trading bot or any service is down, let Madeline know proactively when she asks about it"""
 
 
-ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "")
-ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "JBFqnCBsd6RMkjVDRZzb")
+EDGE_TTS_VOICE = os.getenv("EDGE_TTS_VOICE", "en-GB-RyanNeural")
 
 
 @app.get("/")
@@ -836,7 +835,7 @@ Be direct, no fluff. Address her as Madeline. No emojis. Format with clear day-b
 
     try:
         response = client.messages.create(
-            model="claude-haiku-4-5-20251001",
+            model="claude-sonnet-4-6",
             max_tokens=1500,
             system="You are MARLEY, a sharp AI assistant like JARVIS. Give concise, actionable academic strategy advice. No emojis. British-dry wit is welcome.",
             messages=[{"role": "user", "content": strategy_prompt}],
@@ -980,7 +979,10 @@ async def upload_file(file: UploadFile = File(...)):
 
 @app.post("/api/tts")
 async def text_to_speech(request: Request):
-    """Convert text to speech using ElevenLabs."""
+    """Convert text to speech using edge-tts (free, no API key)."""
+    import edge_tts
+    import io
+
     body = await request.json()
     text = body.get("text", "").strip()
     if not text:
@@ -998,35 +1000,28 @@ async def text_to_speech(request: Request):
         (r'^[\-\*] ', ''),
         (r'^\d+\. ', ''),
     ]:
-        import re as _re
-        clean = _re.sub(pattern, repl, clean, flags=_re.MULTILINE)
+        clean = re.sub(pattern, repl, clean, flags=re.MULTILINE)
 
-    async with httpx.AsyncClient() as http:
-        resp = await http.post(
-            f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}",
-            headers={
-                "xi-api-key": ELEVENLABS_API_KEY,
-                "Content-Type": "application/json",
-            },
-            json={
-                "text": clean[:1000],  # cap to save quota
-                "model_id": "eleven_turbo_v2",
-                "voice_settings": {
-                    "stability": 0.7,
-                    "similarity_boost": 0.8,
-                },
-            },
-            timeout=30.0,
+    clean = clean[:1000]
+
+    try:
+        communicate = edge_tts.Communicate(clean, EDGE_TTS_VOICE)
+        audio_data = io.BytesIO()
+        async for chunk in communicate.stream():
+            if chunk["type"] == "audio":
+                audio_data.write(chunk["data"])
+
+        audio_bytes = audio_data.getvalue()
+        if not audio_bytes:
+            return {"error": "TTS produced no audio"}
+
+        return StreamingResponse(
+            iter([audio_bytes]),
+            media_type="audio/mpeg",
+            headers={"Content-Length": str(len(audio_bytes))},
         )
-
-    if resp.status_code != 200:
-        return {"error": f"ElevenLabs error: {resp.status_code}"}
-
-    return StreamingResponse(
-        iter([resp.content]),
-        media_type="audio/mpeg",
-        headers={"Content-Length": str(len(resp.content))},
-    )
+    except Exception as e:
+        return {"error": f"TTS error: {e}"}
 
 
 @app.websocket("/ws")
@@ -1089,7 +1084,7 @@ async def websocket_endpoint(ws: WebSocket):
                         full_system += f"\n\n## Current context\n- Location: {loc}\n- Local time: {now.strftime('%A, %B %d, %Y %I:%M %p')}"
 
                     with client.messages.stream(
-                        model="claude-haiku-4-5-20251001",
+                        model="claude-sonnet-4-6",
                         max_tokens=8192,
                         system=full_system,
                         tools=TOOLS,
