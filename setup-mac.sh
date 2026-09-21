@@ -48,12 +48,31 @@ if command -v python3 &>/dev/null; then
   else
     echo -e "${YELLOW}  Python $PY_VERSION is too old (need 3.11+). Installing via Homebrew...${NC}"
     brew install python@3.13
-    PY=$(brew --prefix python@3.13)/bin/python3
+    PY=$(brew --prefix)/bin/python3.13
+    # Fallback: search common Homebrew paths
+    if [ ! -x "$PY" ]; then
+      PY=$(find "$(brew --prefix)/opt/python@3.13" -name "python3*" -type f 2>/dev/null | head -1)
+    fi
+    if [ ! -x "$PY" ]; then
+      PY=$(which python3.13 2>/dev/null || true)
+    fi
+    if [ ! -x "$PY" ]; then
+      echo -e "${RED}  Could not find Python 3.13 after install. Try: brew link python@3.13${NC}"
+      exit 1
+    fi
+    echo -e "${GREEN}  Using $PY${NC}"
   fi
 else
   echo -e "${YELLOW}  Python not found. Installing via Homebrew...${NC}"
   brew install python@3.13
-  PY=$(brew --prefix python@3.13)/bin/python3
+  PY=$(brew --prefix)/bin/python3.13
+  if [ ! -x "$PY" ]; then
+    PY=$(which python3.13 2>/dev/null || true)
+  fi
+  if [ ! -x "$PY" ]; then
+    echo -e "${RED}  Could not find Python 3.13 after install. Try: brew link python@3.13${NC}"
+    exit 1
+  fi
 fi
 
 # ── Step 3: Virtual environment ───────────────────────────
