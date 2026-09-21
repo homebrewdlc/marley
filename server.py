@@ -782,7 +782,7 @@ You have access to these systems on this machine:
 - If the trading bot or any service is down, let Madeline know proactively when she asks about it"""
 
 
-EDGE_TTS_VOICE = os.getenv("EDGE_TTS_VOICE", "en-GB-RyanNeural")
+EDGE_TTS_VOICE = os.getenv("EDGE_TTS_VOICE", "en-GB-SoniaNeural")
 
 
 @app.get("/")
