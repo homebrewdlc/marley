@@ -22,7 +22,7 @@ import httpx
 from canvas import (
     get_assignments, get_grades, get_assignment_detail,
     get_assignment_content,
-    start_canvas_login, submit_2fa_code, get_auth_status,
+    start_canvas_login, get_auth_status,
     has_valid_session, clear_cookies, is_configured,
     save_canvas_setup, get_canvas_url,
 )
@@ -308,7 +308,7 @@ TOOLS = [
     },
     {
         "name": "canvas_setup",
-        "description": "Configure Canvas LMS for the first time. Use when the user provides their school's Canvas URL, email, and password. Stores credentials locally on their machine (never sent anywhere). Use this BEFORE canvas_login if Canvas is not yet configured.",
+        "description": "Configure Canvas LMS for the first time. Use when the user provides their school's Canvas URL. Saves the URL locally. Use this BEFORE canvas_login if Canvas is not yet configured.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -316,21 +316,13 @@ TOOLS = [
                     "type": "string",
                     "description": "The school's Canvas URL (e.g. 'https://school.instructure.com' or 'canvas.school.edu')",
                 },
-                "email": {
-                    "type": "string",
-                    "description": "The user's school email address",
-                },
-                "password": {
-                    "type": "string",
-                    "description": "The user's school password",
-                },
             },
-            "required": ["canvas_url", "email", "password"],
+            "required": ["canvas_url"],
         },
     },
     {
         "name": "canvas_login",
-        "description": "Log into Canvas LMS via SSO. Triggers a 2FA push notification to the user's phone. Use when Canvas session has expired or the user asks to log into Canvas.",
+        "description": "Log into Canvas LMS. Opens a browser window on this machine so the user can log in manually (SSO, 2FA, etc). Use when Canvas session has expired or the user asks to log into Canvas.",
         "input_schema": {
             "type": "object",
             "properties": {},
@@ -697,14 +689,14 @@ def tool_read_assignment(assignment_id: int) -> str:
         return json.dumps({"error": f"Failed to read assignment: {e}"})
 
 
-def tool_canvas_setup(canvas_url: str, email: str, password: str) -> str:
-    result = save_canvas_setup(canvas_url, email, password)
+def tool_canvas_setup(canvas_url: str) -> str:
+    result = save_canvas_setup(canvas_url)
     return json.dumps(result)
 
 
 def tool_canvas_login() -> str:
     if not is_configured():
-        return json.dumps({"status": "not_configured", "message": "Canvas is not set up yet. I need your school's Canvas URL, email, and password first."})
+        return json.dumps({"status": "not_configured", "message": "Canvas is not set up yet. I need your school's Canvas URL first."})
     if has_valid_session():
         return json.dumps({"status": "already_authenticated", "message": "Canvas session is still valid."})
     result = start_canvas_login()
@@ -728,7 +720,7 @@ def execute_tool(name: str, input_data: dict) -> str:
     elif name == "read_assignment":
         return tool_read_assignment(input_data["assignment_id"])
     elif name == "canvas_setup":
-        return tool_canvas_setup(input_data["canvas_url"], input_data["email"], input_data["password"])
+        return tool_canvas_setup(input_data["canvas_url"])
     elif name == "canvas_login":
         return tool_canvas_login()
     elif name == "run_command":
@@ -763,7 +755,7 @@ You have access to these systems on this machine:
 
 **Agent HQ** — Command center dashboard that monitors all the other agents.
 
-**Canvas LMS** — You can check homework assignments, grades, and details about specific assignments from Canvas. If Canvas isn't set up yet, ask for the school's Canvas URL, email, and password — then use canvas_setup to save it locally. If the session has expired, use canvas_login (the user will need to approve the 2FA push on their phone). Credentials are stored locally on this machine only, never sent anywhere else.
+**Canvas LMS** — You can check homework assignments, grades, and details about specific assignments from Canvas. If Canvas isn't set up yet, ask for the school's Canvas URL — then use canvas_setup to save it. If the session has expired, use canvas_login — this opens a browser window on the machine so the user can log in manually (SSO, 2FA, etc at their own pace). Once they finish, the session is captured automatically.
 
 **Shell Access** — You can run shell commands for system checks, file operations, or launching tools. You can launch Claude Code (`claude -p "prompt"`) to build things.
 
@@ -773,8 +765,8 @@ You have access to these systems on this machine:
 - For casual questions about systems, use the appropriate tool and summarize naturally
 - For homework/school questions, use check_canvas — summarize naturally, highlight urgency
 - When the user sends a URL or asks you to read a link/PDF/document, use read_link immediately
-- If Canvas returns "not configured", ask for the school's Canvas URL, email, and password, then use canvas_setup
-- If Canvas returns "not logged in" or "session expired", do NOT automatically call canvas_login. Instead, tell the user their Canvas session needs to be refreshed and ask them to say "log into Canvas" when they are ready (they will need to approve a 2FA push on their phone). Only call canvas_login when the user explicitly asks to log in.
+- If Canvas returns "not configured", ask for the school's Canvas URL, then use canvas_setup
+- If Canvas returns "not logged in" or "session expired", tell the user their Canvas session needs to be refreshed and ask them to say "log into Canvas" when ready. Only call canvas_login when the user explicitly asks to log in — it opens a browser window on their machine for them to log in manually.
 - For general knowledge or current events, use web search
 - For building/coding requests, you can launch Claude Code with `run_command`
 - Keep responses conversational unless the user wants detail

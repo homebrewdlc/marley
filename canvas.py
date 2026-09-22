@@ -2,10 +2,10 @@
 canvas.py — Canvas LMS integration for Marley.
 
 Handles:
-  - Local config storage (Canvas URL + credentials per user)
-  - Session cookie caching + auto-reauth via Playwright SSO
+  - Local config storage (Canvas URL + credentials)
+  - Session cookie caching via visible-browser login
   - Fetching assignments, grades, and assignment details
-  - Works with any Canvas LMS instance (Microsoft SSO + 2FA)
+  - Works with any Canvas LMS instance
 """
 
 import os
@@ -43,8 +43,8 @@ def _save_config(config: dict):
     CONFIG_FILE.write_text(json.dumps(config, indent=2))
 
 
-def save_canvas_setup(canvas_url: str, email: str, password: str) -> dict:
-    """Save Canvas credentials to local config (not committed to git)."""
+def save_canvas_setup(canvas_url: str) -> dict:
+    """Save Canvas URL to local config."""
     # Normalize URL
     canvas_url = canvas_url.rstrip("/")
     if not canvas_url.startswith("http"):
@@ -52,11 +52,9 @@ def save_canvas_setup(canvas_url: str, email: str, password: str) -> dict:
 
     config = _load_config()
     config["canvas_url"] = canvas_url
-    config["email"] = email
-    config["password"] = password
     _save_config(config)
-    clear_cookies()  # force fresh login with new creds
-    return {"status": "saved", "canvas_url": canvas_url, "message": f"Canvas configured for {canvas_url}. Credentials stored locally."}
+    clear_cookies()  # force fresh login with new URL
+    return {"status": "saved", "canvas_url": canvas_url, "message": f"Canvas configured for {canvas_url}. Say 'log into Canvas' to open the login browser."}
 
 
 def get_canvas_url() -> str | None:
@@ -70,7 +68,7 @@ def _canvas_url() -> str:
 
 def is_configured() -> bool:
     config = _load_config()
-    return bool(config.get("canvas_url") and config.get("email") and config.get("password"))
+    return bool(config.get("canvas_url"))
 
 # ── Cookie cache ────────────────────────────────────────
 _cookie_lock = threading.Lock()
@@ -131,14 +129,13 @@ def has_valid_session() -> bool:
     return _load_cookies() is not None
 
 
-# ── Playwright SSO login ────────────────────────────────
-# Runs in a dedicated thread (Playwright requirement).
+# ── Visible-browser login ─────────────────────────────────
+# Opens a real Chromium window so the user can log in manually.
+# Marley watches for the URL to land on Canvas, grabs cookies, done.
 
 _auth_lock = threading.Lock()
 _auth_state = {"status": "idle"}
-_init_q = queue.Queue(maxsize=1)
-_code_q = queue.Queue(maxsize=1)
-_final_q = queue.Queue(maxsize=1)
+_login_result_q = queue.Queue(maxsize=1)
 
 
 def get_auth_status() -> dict:
@@ -153,187 +150,94 @@ def _auth_set(**kwargs) -> dict:
     return dict(kwargs)
 
 
-def start_canvas_login(email: str = None, password: str = None) -> dict:
-    """Kick off SSO login. Blocks until 2FA detection (~60s max)."""
-    config = _load_config()
-    email = email or config.get("email", "")
-    password = password or config.get("password", "")
-    if not email or not password:
-        return _auth_set(status="error", message="Canvas not configured. Tell me your school's Canvas URL, email, and password to set it up.")
+def start_canvas_login() -> dict:
+    """Open a visible browser for the user to log into Canvas manually."""
+    canvas_url = get_canvas_url()
+    if not canvas_url:
+        return _auth_set(status="error", message="Canvas is not configured. Tell me your school's Canvas URL first.")
 
-    _flush_queues()
-    _auth_set(status="pending")
-    threading.Thread(target=_login_thread, args=(email, password), daemon=True).start()
+    # Flush any previous result
+    while not _login_result_q.empty():
+        try:
+            _login_result_q.get_nowait()
+        except queue.Empty:
+            break
+
+    _auth_set(status="pending", message="Opening browser — log into Canvas and I'll take it from there.")
+    threading.Thread(target=_visible_login_thread, args=(canvas_url,), daemon=True).start()
+
+    # Wait up to 5 minutes for the user to complete login
     try:
-        return _init_q.get(timeout=60)
+        return _login_result_q.get(timeout=300)
     except queue.Empty:
-        return _auth_set(status="error", message="Login timed out.")
+        return _auth_set(status="error", message="Login timed out after 5 minutes. Try again when you're ready.")
 
 
-def submit_2fa_code(code: str) -> dict:
-    """Send 2FA code to the login thread."""
+def _visible_login_thread(canvas_url: str):
+    """Launch visible Chromium, wait for user to log in, capture cookies."""
     try:
-        _code_q.put_nowait(code)
-    except queue.Full:
-        return _auth_set(status="error", message="No active login session.")
-    try:
-        return _final_q.get(timeout=30)
-    except queue.Empty:
-        return _auth_set(status="error", message="Timed out after code submission.")
-
-
-def _login_thread(email: str, password: str):
-    try:
-        from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
+        from playwright.sync_api import sync_playwright
     except ImportError:
-        _auth_set(status="error", message="Playwright not installed. Run: pip install playwright && playwright install chromium")
-        _safe_put(_init_q, get_auth_status())
+        result = _auth_set(status="error", message="Playwright not installed. Run: pip install playwright && playwright install chromium")
+        _safe_put(_login_result_q, result)
         return
 
     pw = browser = None
     try:
         pw = sync_playwright().start()
         browser = pw.chromium.launch(
-            headless=True,
-            args=["--disable-blink-features=AutomationControlled", "--no-sandbox",
-                  "--disable-dev-shm-usage", "--disable-gpu"],
+            headless=False,
+            args=["--no-sandbox", "--disable-dev-shm-usage"],
         )
         context = browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-            locale="en-US", timezone_id="America/New_York",
+            locale="en-US",
+            timezone_id="America/New_York",
         )
-        context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
         page = context.new_page()
-
-        # Navigate to Canvas (redirects to Microsoft SSO)
-        canvas_url = get_canvas_url() or "https://canvas.instructure.com"
         page.goto(canvas_url, wait_until="load", timeout=30_000)
 
-        if _on_canvas(page):
-            _init_q.put(_finish(page))
-            return
+        # Already logged in?
+        if canvas_url in page.url:
+            cookies = _extract_cookies(page, canvas_url)
+            if cookies:
+                _save_cookies(cookies)
+                _safe_put(_login_result_q, _auth_set(
+                    status="success",
+                    message=f"Already logged in. Session cached for {COOKIE_TTL // 3600} hours.",
+                ))
+                return
 
-        # Microsoft email step
-        try:
-            page.wait_for_selector('input[name="loginfmt"], input[type="email"]', timeout=15_000)
-        except PlaywrightTimeout:
-            _init_q.put(_auth_set(status="error", message=f"Could not reach Microsoft login. Page: {page.url}"))
-            return
-
-        page.fill('input[name="loginfmt"]', email)
-        page.click('#idSIButton9')
-
-        # Password step
-        try:
-            page.wait_for_selector('input[name="passwd"]', timeout=15_000)
-        except PlaywrightTimeout:
-            _init_q.put(_auth_set(status="error", message="Email step failed."))
-            return
-
-        if _has_error(page):
-            _init_q.put(_auth_set(status="error", message=_error_text(page) or "Email not recognised."))
-            return
-
-        page.fill('input[name="passwd"]', password)
-        page.click('#idSIButton9')
-        try:
-            page.wait_for_load_state("networkidle", timeout=20_000)
-        except PlaywrightTimeout:
-            page.wait_for_load_state("load", timeout=10_000)
-
-        if _on_canvas(page):
-            _init_q.put(_finish(page))
-            return
-
-        # Wait for 2FA page to load
-        try:
-            page.wait_for_selector('div[data-value], input[name="otc"], input[name="code"], #idRichContext_DisplaySign', timeout=20_000)
-        except PlaywrightTimeout:
-            pass
-
-        # Only treat as a hard error if the method picker is NOT present
-        # (the "trouble verifying" message often appears alongside the picker as a soft warning)
-        if _has_error(page) and not _is_method_picker(page):
-            _init_q.put(_auth_set(status="error", message=_error_text(page) or "Incorrect password."))
-            return
-
-        is_picker = _is_method_picker(page)
-        print(f"[canvas-auth] Method picker check: {is_picker}", flush=True)
-        if is_picker:
-            picked = _pick_otp_method(page)
-            if picked:
-                twofa = "code"
-                print("[canvas-auth] Switched to OTP code entry", flush=True)
-            else:
-                twofa = _detect_2fa(page)
-                print(f"[canvas-auth] OTP pick failed, fallback 2FA type: {twofa}", flush=True)
-        else:
-            twofa = _detect_2fa(page)
-            print(f"[canvas-auth] 2FA type: {twofa}", flush=True)
-
-        if twofa == "push":
-            number = _get_display_number(page)
-            _init_q.put(_auth_set(status="needs_push", number=number,
-                                   message=f"Approve the sign-in on your phone. Number: {number}" if number else "Approve the sign-in on your phone."))
-            _wait_for_push(page)
-            return
-
-        if twofa == "code":
-            prompt = _get_2fa_prompt(page)
-            _init_q.put(_auth_set(status="needs_code", message=prompt))
+        # Poll until the URL lands on Canvas (user is logging in manually)
+        print("[canvas-auth] Browser open — waiting for user to complete login...", flush=True)
+        for _ in range(600):  # poll for up to 5 min (every 0.5s)
+            time.sleep(0.5)
             try:
-                code = _code_q.get(timeout=120)
-            except queue.Empty:
-                _final_q.put(_auth_set(status="error", message="Timed out waiting for code."))
+                current_url = page.url
+            except Exception:
+                # Browser was closed by user
+                _safe_put(_login_result_q, _auth_set(
+                    status="error", message="Browser was closed before login completed.",
+                ))
                 return
 
-            filled = False
-            for sel in ['#idTxtBx_SAOTCC_OTC', 'input[name="otc"]', 'input[name="code"]', 'input[autocomplete="one-time-code"]']:
-                try:
-                    page.wait_for_selector(sel, timeout=5_000)
-                    page.fill(sel, code)
-                    filled = True
-                    break
-                except PlaywrightTimeout:
-                    continue
+            if canvas_url in current_url:
+                cookies = _extract_cookies(page, canvas_url)
+                if cookies:
+                    _save_cookies(cookies)
+                    print("[canvas-auth] Login successful, cookies captured.", flush=True)
+                    _safe_put(_login_result_q, _auth_set(
+                        status="success",
+                        message=f"Logged into Canvas. Session cached for {COOKIE_TTL // 3600} hours.",
+                    ))
+                    return
 
-            if not filled:
-                _final_q.put(_auth_set(status="error", message="Could not find the code input."))
-                return
-
-            page.locator('#idSubmit_SAOTCC_Continue, #idSIButton9, input[type="submit"]').first.click()
-            page.wait_for_load_state("load", timeout=20_000)
-
-            if _has_error(page):
-                _final_q.put(_auth_set(status="error", message=_error_text(page) or "Invalid code."))
-                return
-
-            if _has_stay_signed_in(page):
-                page.locator('#idBtn_Back, button:has-text("No"), input[value="No"]').first.click()
-                page.wait_for_load_state("load", timeout=10_000)
-
-            if not _on_canvas(page):
-                try:
-                    page.wait_for_url(f"*{_canvas_url()}*", timeout=15_000)
-                except PlaywrightTimeout:
-                    page.goto(_canvas_url(), wait_until="load", timeout=20_000)
-
-            _final_q.put(_finish(page))
-            return
-
-        if _has_stay_signed_in(page):
-            page.locator('#idBtn_Back, input[value="No"]').first.click()
-            page.wait_for_load_state("load", timeout=10_000)
-            if _on_canvas(page):
-                _init_q.put(_finish(page))
-                return
-
-        _init_q.put(_auth_set(status="error", message=f"Unexpected page after login: {page.url}"))
+        _safe_put(_login_result_q, _auth_set(
+            status="error", message="Login timed out. Try again when you're ready.",
+        ))
 
     except Exception as e:
-        result = _auth_set(status="error", message=str(e))
-        _safe_put(_init_q, result)
-        _safe_put(_final_q, result)
+        _safe_put(_login_result_q, _auth_set(status="error", message=str(e)))
     finally:
         try:
             browser.close()
@@ -345,185 +249,17 @@ def _login_thread(email: str, password: str):
             pass
 
 
-def _wait_for_push(page):
-    from playwright.sync_api import TimeoutError as PlaywrightTimeout
-    for _ in range(150):  # up to 5 min
-        time.sleep(2)
-        try:
-            if _on_canvas(page):
-                _finish(page)
-                return
-
-            if _has_stay_signed_in(page):
-                page.locator('#idBtn_Back, button:has-text("No"), input[value="No"]').first.click()
-                continue
-
-            url = page.url
-            if _canvas_url() not in url and _is_microsoft(url):
-                gone = page.locator('#idRichContext_DisplaySign, #displaySign, .displaySign').count() == 0
-                if gone:
-                    time.sleep(4)
-                    if _has_stay_signed_in(page):
-                        page.locator('#idBtn_Back, button:has-text("No"), input[value="No"]').first.click()
-                        time.sleep(2)
-                    try:
-                        page.goto(_canvas_url(), wait_until="load", timeout=20_000)
-                    except PlaywrightTimeout:
-                        pass
-                    _finish(page)
-                    return
-        except Exception as e:
-            err = str(e).lower()
-            if any(k in err for k in ["closed", "target", "destroyed"]):
-                _auth_set(status="error", message="Browser session lost.")
-                return
-
-    _auth_set(status="error", message="Push notification timed out.")
-
-
-def _finish(page) -> dict:
-    cookies = _extract_cookies(page)
-    if cookies:
-        _save_cookies(cookies)
-        return _auth_set(status="success", message=f"Logged into Canvas. Session cached for {COOKIE_TTL // 3600} hours.")
-    return _auth_set(status="error", message="Logged in but could not extract session cookies.")
-
-
-def _extract_cookies(page) -> dict | None:
+def _extract_cookies(page, canvas_url: str) -> dict | None:
+    """Pull Canvas session cookies from the browser context."""
     try:
-        if _canvas_url() not in page.url:
-            page.goto(_canvas_url(), wait_until="load", timeout=15_000)
+        if canvas_url not in page.url:
+            page.goto(canvas_url, wait_until="load", timeout=15_000)
         cookies = page.context.cookies()
-        domain = _canvas_url().split("//")[1]
+        domain = canvas_url.split("//")[1].split("/")[0]
         cookie_dict = {c["name"]: c["value"] for c in cookies if domain in c.get("domain", "")}
         return cookie_dict if cookie_dict else None
     except Exception:
         return None
-
-
-# ── 2FA helpers ─────────────────────────────────────────
-
-def _detect_2fa(page) -> str | None:
-    from playwright.sync_api import TimeoutError as PlaywrightTimeout
-    number_sel = '#idRichContext_DisplaySign, #displaySign, .displaySign, [data-bind*="DisplaySign"], #idDiv_SAOTCC_DisplaySign'
-    code_sel = 'input[name="otc"], input[name="code"], input[autocomplete="one-time-code"]'
-    try:
-        page.wait_for_selector(f'{number_sel}, {code_sel}', timeout=20_000)
-    except PlaywrightTimeout:
-        pass
-
-    for sel in number_sel.split(', '):
-        try:
-            if page.locator(sel.strip()).count() > 0:
-                return "push"
-        except Exception:
-            pass
-
-    for sel in code_sel.split(', '):
-        try:
-            el = page.locator(sel.strip()).first
-            if el.count() > 0 and el.is_visible():
-                return "code"
-        except Exception:
-            pass
-
-    html = page.content().lower()
-    if any(k in html for k in ["enter the number shown", "approve sign in", "push notification", "number matching"]):
-        return "push"
-    if any(k in html for k in ["verification code", "enter the code", "one-time"]):
-        return "code"
-    return None
-
-
-def _is_method_picker(page) -> bool:
-    """Check if the page is a 2FA method selection screen."""
-    try:
-        count = page.locator('div[data-value="PhoneAppOTP"]').count()
-        total = page.locator('div[data-value]').count()
-        print(f"[canvas-auth] _is_method_picker: PhoneAppOTP={count}, total data-value divs={total}", flush=True)
-        # It's a picker if there are multiple method options
-        return total >= 2
-    except Exception as e:
-        print(f"[canvas-auth] _is_method_picker error: {e}", flush=True)
-        return False
-
-
-def _pick_otp_method(page) -> bool:
-    """Click the OTP code option on the method picker page."""
-    from playwright.sync_api import TimeoutError as PlaywrightTimeout
-    try:
-        otp_option = page.locator('div[data-value="PhoneAppOTP"]').first
-        if otp_option.count() > 0 and otp_option.is_visible():
-            otp_option.click()
-            # Wait for the code input to appear — it loads dynamically
-            try:
-                page.wait_for_selector('#idTxtBx_SAOTCC_OTC, input[name="otc"]', timeout=10_000)
-                return True
-            except PlaywrightTimeout:
-                pass
-    except Exception as e:
-        print(f"[canvas-auth] OTP pick error: {e}", flush=True)
-    return False
-
-
-def _get_display_number(page) -> str | None:
-    for sel in ['#idRichContext_DisplaySign', '#displaySign', '.displaySign']:
-        try:
-            el = page.locator(sel).first
-            if el.count() > 0:
-                tag = el.evaluate("e => e.tagName").upper()
-                text = (el.input_value() if tag == "INPUT" else el.text_content() or "").strip()
-                if text:
-                    return text
-        except Exception:
-            continue
-    return None
-
-
-def _get_2fa_prompt(page) -> str:
-    for sel in [".text-title", "#idDiv_SAOTCS_Title", "#idDiv_SAOTCC_Title", "h1"]:
-        try:
-            el = page.locator(sel).first
-            if el.count() > 0:
-                text = el.text_content().strip()
-                if text:
-                    return text
-        except Exception:
-            pass
-    return "Enter your verification code."
-
-
-def _has_error(page) -> bool:
-    try:
-        err = page.locator('#idTd_Tile_ErrorMessage, .alert-error, [aria-live="assertive"]').first
-        return err.count() > 0 and bool((err.text_content() or "").strip())
-    except Exception:
-        return False
-
-
-def _error_text(page) -> str:
-    try:
-        return page.locator('#idTd_Tile_ErrorMessage, .alert-error, [aria-live="assertive"]').first.text_content().strip()
-    except Exception:
-        return ""
-
-
-def _on_canvas(page) -> bool:
-    try:
-        return _canvas_url() in page.url
-    except Exception:
-        return False
-
-
-def _is_microsoft(url: str) -> bool:
-    return any(d in url for d in ["microsoftonline.com", "microsoft.com", "live.com"])
-
-
-def _has_stay_signed_in(page) -> bool:
-    try:
-        return page.locator('#idBtn_Back, input[value="No"]').count() > 0
-    except Exception:
-        return False
 
 
 def _safe_put(q: queue.Queue, item):
@@ -531,15 +267,6 @@ def _safe_put(q: queue.Queue, item):
         q.put_nowait(item)
     except queue.Full:
         pass
-
-
-def _flush_queues():
-    for q in (_init_q, _code_q, _final_q):
-        while not q.empty():
-            try:
-                q.get_nowait()
-            except queue.Empty:
-                break
 
 
 # ── Canvas API calls ────────────────────────────────────
